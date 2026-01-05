@@ -11,24 +11,33 @@ extern void __wasm_call_ctors(void);
 extern int __main_void(void);
 extern void __wasm_call_dtors(void);
 
-__attribute__((export_name("_start")))
-void _start(void) {
-    // Commands should only be called once per instance. This simple check
-    // ensures that the `_start` function isn't started more than once.
-    //
-    // We use `volatile` here to prevent the store to `started` from being
-    // sunk past any subsequent code, and to prevent any compiler from
-    // optimizing based on the knowledge that `_start` is the program
-    // entrypoint.
+// On WASIP3, the _start function is implemented in crt/wasm32/wasip3-crt1-start.s
+// so that it can initialize the stack pointer and TLS before calling the real
+// _start function (renamed to _libc_start here).
+#ifdef __wasilibc_use_wasip3
+void _libc_start(void)
+#else
+__attribute__((export_name("_start"))) void _start(void)
+#endif
+{
+// Commands should only be called once per instance. This simple check
+// ensures that the `_start` function isn't started more than once.
+//
+// We use `volatile` here to prevent the store to `started` from being
+// sunk past any subsequent code, and to prevent any compiler from
+// optimizing based on the knowledge that `_start` is the program
+// entrypoint.
 #ifdef _REENTRANT
     static volatile _Atomic int started = 0;
     int expected = 0;
-    if (!atomic_compare_exchange_strong(&started, &expected, 1)) {
+    if (!atomic_compare_exchange_strong(&started, &expected, 1))
+    {
         __builtin_trap();
     }
 #else
     static volatile int started = 0;
-    if (started != 0) {
+    if (started != 0)
+    {
         __builtin_trap();
     }
     started = 1;
@@ -47,15 +56,17 @@ void _start(void) {
     // Call atexit functions, destructors, stdio cleanup, etc.
     __wasm_call_dtors();
 
-    // If main exited successfully, just return, otherwise call
-    // `__wasi_proc_exit`.
+// If main exited successfully, just return, otherwise call
+// `__wasi_proc_exit`.
 #ifdef __wasilibc_use_wasip2
-    if (r != 0) {
-        exit_result_void_void_t status = { .is_err = true };
+    if (r != 0)
+    {
+        exit_result_void_void_t status = {.is_err = true};
         exit_exit(&status);
     }
 #else
-    if (r != 0) {
+    if (r != 0)
+    {
         __wasi_proc_exit(r);
     }
 #endif

@@ -17,10 +17,6 @@ endif
 SYSROOT ?= $(CURDIR)/sysroot
 # A directory to install to for "make install".
 INSTALL_DIR ?= /usr/local
-# single or posix; note that pthread support is still a work-in-progress.
-THREAD_MODEL ?= single
-# p1 or p2; the latter is not (yet) compatible with multithreading
-WASI_SNAPSHOT ?= p1
 # dlmalloc or none
 MALLOC_IMPL ?= dlmalloc
 # yes or no
@@ -29,17 +25,7 @@ BUILD_LIBC_TOP_HALF ?= yes
 BUILD_LIBSETJMP ?= yes
 
 # Set the default WASI target triple.
-TARGET_TRIPLE ?= wasm32-wasi
-
-# Threaded version necessitates a different target, as objects from different
-# targets can't be mixed together while linking.
-ifeq ($(THREAD_MODEL), posix)
-TARGET_TRIPLE = wasm32-wasip1-threads
-endif
-
-ifeq ($(WASI_SNAPSHOT), p2)
-TARGET_TRIPLE = wasm32-wasip2
-endif
+TARGET_TRIPLE ?= wasm32-wasip3
 
 # The directory where we will store intermediate artifacts.
 OBJDIR ?= build/$(TARGET_TRIPLE)
@@ -88,7 +74,7 @@ LIBC_BOTTOM_HALF_ALL_SOURCES = \
     $(shell find $(LIBC_BOTTOM_HALF_CLOUDLIBC_SRC) -name \*.c) \
     $(shell find $(LIBC_BOTTOM_HALF_SOURCES) -name \*.c))
 
-ifeq ($(WASI_SNAPSHOT), p1)
+ifneq ($(filter wasm32-wasip1 wasm32-wasip1-threads wasm32-wasi,$(TARGET_TRIPLE)),)
 # Omit source files not relevant to WASIp1.  As we introduce files
 # supporting `wasi-sockets` for `wasm32-wasip2`, we'll add those files to
 # this list.
@@ -114,7 +100,7 @@ LIBC_BOTTOM_HALF_ALL_SOURCES := $(filter-out $(LIBC_BOTTOM_HALF_OMIT_SOURCES),$(
 INCLUDE_ALL_CLAUSES := -not -name wasip2.h -not -name descriptor_table.h
 endif
 
-ifeq ($(WASI_SNAPSHOT), p2)
+ifneq ($(filter wasm32-wasip2 wasm32-wasip3,$(TARGET_TRIPLE)),)
 # Omit source files not relevant to WASIp2.
 LIBC_BOTTOM_HALF_OMIT_SOURCES := \
 	$(LIBC_BOTTOM_HALF_CLOUDLIBC_SRC)/libc/sys/socket/send.c \
@@ -145,7 +131,10 @@ LIBWASI_EMULATED_SIGNAL_MUSL_SOURCES = \
     $(LIBC_TOP_HALF_MUSL_SRC_DIR)/string/strsignal.c
 LIBDL_SOURCES = $(LIBC_TOP_HALF_MUSL_SRC_DIR)/misc/dl.c
 LIBSETJMP_SOURCES = $(LIBC_TOP_HALF_MUSL_SRC_DIR)/setjmp/wasm32/rt.c
-LIBC_BOTTOM_HALF_CRT_SOURCES = $(wildcard $(LIBC_BOTTOM_HALF_DIR)/crt/*.c)
+LIBC_BOTTOM_HALF_CRT_SOURCES = $(wildcard $(LIBC_BOTTOM_HALF_DIR)/crt/*.c) 
+ifeq ($(TARGET_TRIPLE), wasm32-wasip3)
+LIBC_BOTTOM_HALF_CRT_SOURCES += $(LIBC_BOTTOM_HALF_DIR)/crt/wasm32/wasip3-crt1-start.s
+endif
 LIBC_TOP_HALF_DIR = libc-top-half
 LIBC_TOP_HALF_MUSL_DIR = $(LIBC_TOP_HALF_DIR)/musl
 LIBC_TOP_HALF_MUSL_SRC_DIR = $(LIBC_TOP_HALF_MUSL_DIR)/src
@@ -272,14 +261,14 @@ LIBC_NONLTO_SOURCES = \
         setjmp/wasm32/rt.c \
     )
 
-ifeq ($(WASI_SNAPSHOT), p2)
+ifeq ($(TARGET_TRIPLE), wasm32-wasip2)
 LIBC_TOP_HALF_MUSL_SOURCES += \
     $(addprefix $(LIBC_TOP_HALF_MUSL_SRC_DIR)/, \
        network/gai_strerror.c \
     )
 endif
 
-# pthreads functions (possibly stub) for either thread model
+# pthreads functions (possibly stub) for all thread models
 LIBC_TOP_HALF_MUSL_SOURCES += \
     $(addprefix $(LIBC_TOP_HALF_MUSL_SRC_DIR)/, \
         env/__init_tls.c \
@@ -326,10 +315,9 @@ LIBC_TOP_HALF_MUSL_SOURCES += \
         thread/pthread_spin_init.c \
         thread/pthread_testcancel.c \
     )
-ifeq ($(THREAD_MODEL), posix)
+
 # pthreads functions needed for actual thread support
-LIBC_TOP_HALF_MUSL_SOURCES += \
-    $(addprefix $(LIBC_TOP_HALF_MUSL_SRC_DIR)/, \
+LIBC_PTHREADS_SHARED = \
         stdio/__lockfile.c \
         stdio/flockfile.c \
         stdio/ftrylockfile.c \
@@ -373,11 +361,20 @@ LIBC_TOP_HALF_MUSL_SOURCES += \
         thread/sem_timedwait.c \
         thread/sem_trywait.c \
         thread/sem_wait.c \
+        thread/wasm32/__wasilibc_busywait.c
+ifeq ($(TARGET_TRIPLE), wasm32-wasip1-threads)
+LIBC_TOP_HALF_MUSL_SOURCES += \
+    $(addprefix $(LIBC_TOP_HALF_MUSL_SRC_DIR)/, \
+        $(LIBC_PTHREADS_SHARED) \
         thread/wasm32/wasi_thread_start.s \
-        thread/wasm32/__wasilibc_busywait.c \
     )
-endif
-ifeq ($(THREAD_MODEL), single)
+else ifeq ($(TARGET_TRIPLE), wasm32-wasip3)
+LIBC_TOP_HALF_MUSL_SOURCES += \
+    $(addprefix $(LIBC_TOP_HALF_MUSL_SRC_DIR)/, \
+        $(LIBC_PTHREADS_SHARED) \
+        thread/wasm32/wasip3_thread_start.s \
+    )
+else
 # pthreads stubs for single-threaded environment
 LIBC_TOP_HALF_MUSL_SOURCES += \
     $(addprefix $(THREAD_STUB_DIR)/, \
@@ -457,14 +454,13 @@ CFLAGS += -Wall -Wextra -Werror \
   -Wno-unterminated-string-initialization
 
 # Configure support for threads.
-ifeq ($(THREAD_MODEL), single)
-CFLAGS += -mthread-model single
-endif
-ifeq ($(THREAD_MODEL), posix)
+ifneq ($(filter wasm32-wasip1-threads wasm32-wasip3,$(TARGET_TRIPLE)),)
 # Specify the tls-model until LLVM 15 is released (which should contain
 # https://reviews.llvm.org/D130053).
 CFLAGS += -mthread-model posix -pthread -ftls-model=local-exec
 ASMFLAGS += -matomics
+else
+CFLAGS += -mthread-model single
 endif
 
 # Include cloudlib's directory to access the structure definition of clockid_t
@@ -473,17 +469,20 @@ CFLAGS += -I$(LIBC_BOTTOM_HALF_CLOUDLIBC_SRC)
 ifneq ($(LTO),no)
 ifeq ($(LTO),full)
 CFLAGS += -flto=full
-else
-ifeq ($(LTO),thin)
+else ifeq ($(LTO),thin)
 CFLAGS += -flto=thin
 else
 $(error unknown LTO value: $(LTO))
 endif
 endif
-endif
 
-ifeq ($(WASI_SNAPSHOT), p2)
+ifeq ($(TARGET_TRIPLE), wasm32-wasip2)
 CFLAGS += -D__wasilibc_use_wasip2
+else ifeq ($(TARGET_TRIPLE), wasm32-wasip3)
+CFLAGS += -D__wasilibc_use_wasip2
+CFLAGS += -D__wasilibc_use_wasip3
+else ifeq ($(TARGET_TRIPLE), wasm32-wasip1-threads)
+CFLAGS += -D__wasilibc_thread_model_posix
 endif
 
 # Expose the public headers to the implementation. We use `-isystem` for
@@ -509,7 +508,7 @@ EMMALLOC_OBJS = $(call objs,$(EMMALLOC_SOURCES))
 LIBC_BOTTOM_HALF_ALL_OBJS = $(call objs,$(LIBC_BOTTOM_HALF_ALL_SOURCES))
 LIBC_TOP_HALF_ALL_OBJS = $(call asmobjs,$(call objs,$(LIBC_TOP_HALF_ALL_SOURCES)))
 FTS_OBJS = $(call objs,$(FTS_SOURCES))
-ifeq ($(WASI_SNAPSHOT), p2)
+ifneq ($(filter wasm32-wasip2 wasm32-wasip3,$(TARGET_TRIPLE)),)
 LIBC_OBJS += $(OBJDIR)/wasip2_component_type.o
 endif
 ifeq ($(MALLOC_IMPL),dlmalloc)
@@ -739,6 +738,22 @@ $(LIBSETJMP_OBJS) $(LIBSETJMP_SO_OBJS): CFLAGS += \
 $(LIBWASI_EMULATED_SIGNAL_MUSL_OBJS) $(LIBWASI_EMULATED_SIGNAL_MUSL_SO_OBJS): CFLAGS += \
 	    -D_WASI_EMULATED_SIGNAL
 
+ifeq ($(TARGET_TRIPLE), wasm32-wasip3)
+$(OBJDIR)/libc-bottom-half/crt/crt1.o: $(LIBC_BOTTOM_HALF_DIR)/crt/crt1.c $(LIBC_BOTTOM_HALF_DIR)/crt/wasm32/wasip3-crt1-start.s $(INCLUDE_DIRS)
+	@mkdir -p "$(@D)"
+	$(CC) $(CFLAGS) -c $(LIBC_BOTTOM_HALF_DIR)/crt/crt1.c -o $@.tmp.o
+	$(CC) $(ASMFLAGS) -c $(LIBC_BOTTOM_HALF_DIR)/crt/wasm32/wasip3-crt1-start.s -o $@.asm.o
+	$(CC) -r -o $@ $@.tmp.o $@.asm.o -nostdlib
+	rm $@.tmp.o $@.asm.o
+
+$(OBJDIR)/libc-bottom-half/crt/crt1-command.o: $(LIBC_BOTTOM_HALF_DIR)/crt/crt1-command.c $(LIBC_BOTTOM_HALF_DIR)/crt/wasm32/wasip3-crt1-start.s $(INCLUDE_DIRS)
+	@mkdir -p "$(@D)"
+	$(CC) $(CFLAGS) -c $(LIBC_BOTTOM_HALF_DIR)/crt/crt1-command.c -o $@.tmp.o
+	$(CC) $(ASMFLAGS) -c $(LIBC_BOTTOM_HALF_DIR)/crt/wasm32/wasip3-crt1-start.s -o $@.asm.o
+	$(CC) -r -o $@ $@.tmp.o $@.asm.o -nostdlib
+	rm $@.tmp.o $@.asm.o
+endif
+
 $(OBJDIR)/%.long-double.pic.o: %.c $(INCLUDE_DIRS)
 	@mkdir -p "$(@D)"
 	$(CC) $(CFLAGS) -MD -MP -o $@ -c $<
@@ -832,10 +847,10 @@ $(STARTUP_FILES): $(INCLUDE_DIRS) $(LIBC_BOTTOM_HALF_CRT_OBJS)
 
 startup_files: $(STARTUP_FILES)
 
-# TODO: As of this writing, wasi_thread_start.s uses non-position-independent
-# code, and I'm not sure how to make it position-independent.  Once we've done
+# TODO: As of this writing, wasi_thread_start.s and wasm_coop_thread_start.s use non-position-independent
+# code, and I'm not sure how to make them position-independent.  Once we've done
 # that, we can enable libc.so for the wasi-threads build.
-ifneq ($(THREAD_MODEL), posix)
+ifeq ($(filter wasm32-wasip1-threads wasm32-wasip3,$(TARGET_TRIPLE)),)
 LIBC_SO = \
 	$(SYSROOT_LIB)/libc.so \
 	$(SYSROOT_LIB)/libwasi-emulated-mman.so \
@@ -896,16 +911,7 @@ install: finish
 DEFINED_SYMBOLS = $(SYSROOT_SHARE)/defined-symbols.txt
 UNDEFINED_SYMBOLS = $(SYSROOT_SHARE)/undefined-symbols.txt
 
-ifeq ($(WASI_SNAPSHOT),p2)
-EXPECTED_TARGET_DIR = expected/wasm32-wasip2
-else
-ifeq ($(THREAD_MODEL),posix)
-EXPECTED_TARGET_DIR = expected/wasm32-wasip1-threads
-else
-EXPECTED_TARGET_DIR = expected/wasm32-wasip1
-endif
-endif
-
+EXPECTED_TARGET_DIR = "expected/$(TARGET_TRIPLE)"
 
 check-symbols: $(STARTUP_FILES) libc
 	#
@@ -926,7 +932,7 @@ check-symbols: $(STARTUP_FILES) libc
 	    |grep ' U ' |sed 's/.* U //' |LC_ALL=C sort |uniq); do \
 	    grep -q '\<'$$undef_sym'\>' "$(DEFINED_SYMBOLS)" || echo $$undef_sym; \
 	done | grep -E -v "^__mul|__memory_base|__indirect_function_table|__tls_base" > "$(UNDEFINED_SYMBOLS)"
-ifneq ($(WASI_SNAPSHOT), p2)
+ifneq ($(filter wasm32-wasip2 wasm32-wasip3,$(TARGET_TRIPLE)),)
 	grep '^_*imported_wasi_' "$(UNDEFINED_SYMBOLS)" \
 	    > "$(SYSROOT_LIB)/libc.imports"
 endif
