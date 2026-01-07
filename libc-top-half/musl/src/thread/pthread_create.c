@@ -412,6 +412,8 @@ int __pthread_create(pthread_t *restrict res, const pthread_attr_t *restrict att
 	void *tls_base = __builtin_wasm_tls_base();
 	void *new_tls_base;
 	size_t tls_offset;
+	/* We'll need to allocate space for a correctly-aligned TLS block,
+	   so adjust the size accordingly. */
 	tls_size += tls_align;
 #endif
 
@@ -462,6 +464,7 @@ int __pthread_create(pthread_t *restrict res, const pthread_attr_t *restrict att
 		 * application's stack space. */
 		if (need < size / 8 && need < 2048)
 		{
+			printf("Using user-provided stack for TLS\n");
 			tsd = stack - __pthread_tsd_size;
 #ifdef __wasilibc_unmodified_upstream
 			stack = tsd - libc.tls_size;

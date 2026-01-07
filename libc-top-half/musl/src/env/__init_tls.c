@@ -204,7 +204,7 @@ void *__copy_tls(unsigned char *mem)
 	size_t tls_align = __builtin_wasm_tls_align();
 	mem += tls_align;
 	mem -= (uintptr_t)mem & (tls_align - 1);
-	//__wasm_init_tls(mem);
+	__wasm_init_tls(mem);
 #ifndef __wasilibc_use_wasip3
 	volatile void *tls_base = __builtin_wasm_tls_base();
 	__asm__("local.get %0\n"
