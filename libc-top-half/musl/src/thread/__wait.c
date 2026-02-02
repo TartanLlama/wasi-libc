@@ -45,6 +45,51 @@ int __wasilibc_futex_wait(volatile void *addr, int op, int val, int64_t max_wait
 }
 #endif
 
+#ifdef __wasip3__
+#include <wasi/api.h>
+
+void __waitlist_wait_on(struct __waitlist_node **list)
+{
+    struct __waitlist_node node = {
+        .tid = wasip3_thread_index(),
+        .next = *list,
+    };
+    *list = &node;
+    
+    wasip3_thread_suspend();
+}
+
+void __waitlist_wake_one(struct __waitlist_node **list)
+{
+    if (*list == NULL) {
+        return;
+    }
+    struct __waitlist_node *node = *list;
+    *list = node->next;
+    wasip3_thread_yield_to_suspended(node->tid);
+}
+
+void __waitlist_wake_all(struct __waitlist_node **list)
+{
+    struct __waitlist_node **prev = list;
+    struct __waitlist_node *curr = *list;
+
+    while (curr) {
+        uint32_t tid = curr->tid;
+        *prev = curr->next;
+        // As a scheduling optimization, we always yield directly to the last
+        // suspended thread instead of just scheduling it to run at some point.
+        if (curr->next == NULL) {
+            wasip3_thread_yield_to_suspended(tid);
+        }
+        else {
+            wasip3_thread_unsuspend(tid);
+        }
+        curr = *prev;
+    }
+}
+#endif
+
 void __wait(volatile int *addr, volatile int *waiters, int val, int priv)
 {
 	int spins=100;
@@ -63,4 +108,29 @@ void __wait(volatile int *addr, volatile int *waiters, int val, int priv)
 #endif
 	}
 	if (waiters) a_dec(waiters);
+}
+
+void __wake(volatile void *addr, int cnt, int priv)
+{
+	if (priv) priv = FUTEX_PRIVATE;
+	if (cnt<0) cnt = INT_MAX;
+#ifdef __wasilibc_unmodified_upstream
+	__syscall(SYS_futex, addr, FUTEX_WAKE|priv, cnt) != -ENOSYS ||
+	__syscall(SYS_futex, addr, FUTEX_WAKE, cnt);
+#else
+#ifdef _REENTRANT
+	__builtin_wasm_memory_atomic_notify((int*)addr, cnt);
+#endif
+#endif
+}
+
+void __futexwait(volatile void *addr, int val, int priv)
+{
+#ifdef __wasilibc_unmodified_upstream
+	if (priv) priv = FUTEX_PRIVATE;
+	__syscall(SYS_futex, addr, FUTEX_WAIT|priv, val, 0) != -ENOSYS ||
+	__syscall(SYS_futex, addr, FUTEX_WAIT, val, 0);
+#else
+	__wait(addr, NULL, val, priv);
+#endif
 }

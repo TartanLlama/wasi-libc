@@ -1,9 +1,37 @@
 #include "pthread_impl.h"
 
+#ifdef __wasip3__
+
+int __pthread_rwlock_timedwrlock(pthread_rwlock_t *restrict rw, const struct timespec *restrict at)
+{
+	/* Fast path: if no readers or writers, acquire write lock */
+	if (rw->_rw_lock == 0) {
+		rw->_rw_lock = -1;  /* -1 indicates write lock */
+		return 0;
+	}
+	
+	/* Would need to wait, but timeouts not supported */
+	if (at) {
+		errno = ENOSYS;
+		return -1;
+	}
+	
+	/* Wait until no readers and no writers */
+	while (rw->_rw_lock != 0) {
+		__waitlist_wait_on(&rw->_rw_waiters);
+	}
+	
+	/* Acquired, mark as write-locked */
+	rw->_rw_lock = -1;
+	return 0;
+}
+
+#else
+
 int __pthread_rwlock_timedwrlock(pthread_rwlock_t *restrict rw, const struct timespec *restrict at)
 {
 	int r, t;
-	
+
 	r = pthread_rwlock_trywrlock(rw);
 	if (r != EBUSY) return r;
 	
@@ -22,4 +50,4 @@ int __pthread_rwlock_timedwrlock(pthread_rwlock_t *restrict rw, const struct tim
 	return r;
 }
 
-weak_alias(__pthread_rwlock_timedwrlock, pthread_rwlock_timedwrlock);
+#endif

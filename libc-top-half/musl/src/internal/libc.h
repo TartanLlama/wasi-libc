@@ -1,50 +1,55 @@
 #ifndef LIBC_H
 #define LIBC_H
 
-#include <stdlib.h>
-#include <stdio.h>
 #include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 struct __locale_map;
 
 struct __locale_struct {
-	const struct __locale_map *cat[6];
+  const struct __locale_map *cat[6];
 };
 
 struct tls_module {
-	struct tls_module *next;
-	void *image;
-	size_t len, size, align, offset;
+  struct tls_module *next;
+  void *image;
+  size_t len, size, align, offset;
 };
 
 struct __libc {
 #ifdef __wasilibc_unmodified_upstream
-	char can_do_threads;
+  char can_do_threads;
 #endif
-#if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT)
-	char threaded;
+#if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT) ||          \
+    defined(__wasip3__)
+  char threaded;
 #endif
-#ifdef __wasilibc_unmodified_upstream // WASI doesn't currently use any code that needs "secure" mode
-	char secure;
+#ifdef __wasilibc_unmodified_upstream // WASI doesn't currently use any code
+                                      // that needs "secure" mode
+  char secure;
 #endif
-#if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT)
-	volatile signed char need_locks;
-	int threads_minus_1;
+#if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT) ||          \
+    defined(__wasip3__)
+  volatile signed char need_locks;
+  int threads_minus_1;
 #endif
 #ifdef __wasilibc_unmodified_upstream // WASI has no auxv
-	size_t *auxv;
+  size_t *auxv;
 #endif
 #ifdef __wasilibc_unmodified_upstream // WASI use different TLS implement
-	struct tls_module *tls_head;
-	size_t tls_size, tls_align, tls_cnt;
+  struct tls_module *tls_head;
+  size_t tls_size, tls_align, tls_cnt;
 #endif
-#ifdef __wasilibc_unmodified_upstream // WASI doesn't get the page size from auxv
-	size_t page_size;
+#ifdef __wasilibc_unmodified_upstream // WASI doesn't get the page size from
+                                      // auxv
+  size_t page_size;
 #endif
-	struct __locale_struct global_locale;
-#if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT)
+  struct __locale_struct global_locale;
+#if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT) ||          \
+    defined(__wasip3__)
 #else
-	struct __locale_struct *current_locale;
+  struct __locale_struct *current_locale;
 #endif
 };
 

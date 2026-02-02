@@ -11,6 +11,24 @@ weak_alias(dummy1, __tl_sync);
 
 static int __pthread_timedjoin_np(pthread_t t, void **res, const struct timespec *at)
 {
+#ifdef __wasip3__
+	/* If already exited, just return the result */
+	if (t->detach_state == DT_EXITED) {
+		if (res) *res = t->result;
+		if (t->map_base) free(t->map_base);
+		return 0;
+	}
+	
+	/* Timeouts not supported for cooperative threading */
+	if (at) {
+		return ETIMEDOUT;
+	}
+	
+	__waitlist_wait_on(&t->joiner_waiters);
+	if (res) *res = t->result;
+	if (t->map_base) free(t->map_base);
+	return 0;
+#else
 	int state, cs, r = 0;
 	__pthread_testcancel();
 	__pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &cs);
@@ -29,20 +47,12 @@ static int __pthread_timedjoin_np(pthread_t t, void **res, const struct timespec
 	if (t->map_base) free(t->map_base);
 #endif
 	return 0;
+#endif
 }
 
 int __pthread_join(pthread_t t, void **res)
-{	
-	#ifdef __wasip3__
-	if (t->detach_state != DT_EXITED) {
-		t->joining_tid = wasip3_thread_index();
-		wasip3_thread_switch_to(t->tid);
-	}
-	if (res) *res = t->result;
-	return 0;
-	#else
+{
 	return __pthread_timedjoin_np(t, res, 0);
-	#endif
 }
 
 static int __pthread_tryjoin_np(pthread_t t, void **res)

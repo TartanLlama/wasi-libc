@@ -6,13 +6,13 @@
 #ifdef __wasilibc_unmodified_upstream
 #include <sys/mman.h>
 #endif
-#include <wasi/api.h>
-#include <string.h>
-#include <stddef.h>
-#include "pthread_impl.h"
-#include "libc.h"
 #include "atomic.h"
+#include "libc.h"
+#include "pthread_impl.h"
 #include "syscall.h"
+#include <stddef.h>
+#include <string.h>
+#include <wasi/api.h>
 
 #if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT)
 volatile int __thread_list_lock;
@@ -37,115 +37,113 @@ extern weak unsigned char __stack_high;
 extern weak unsigned char __stack_low;
 
 struct stack_bounds {
-	void *base;
-	size_t size;
+  void *base;
+  size_t size;
 };
 
 static inline unsigned char *get_stack_pointer() {
-	unsigned char *sp;
+  unsigned char *sp;
 #ifdef __wasip3__
-	__asm__(
-		".functype   __wasm_component_model_builtin_context_get_0 () -> (i32)\n"
-		".import_module __wasm_component_model_builtin_context_get_0, \"$root\"\n"
-		".import_name __wasm_component_model_builtin_context_get_0, \"[context-get-0]\"\n"
-		"call __wasm_component_model_builtin_context_get_0\n"
-		"local.set %0\n"
-		: "=r"(sp));
+  __asm__(
+      ".functype   __wasm_component_model_builtin_context_get_0 () -> (i32)\n"
+      ".import_module __wasm_component_model_builtin_context_get_0, \"$root\"\n"
+      ".import_name __wasm_component_model_builtin_context_get_0, "
+      "\"[context-get-0]\"\n"
+      "call __wasm_component_model_builtin_context_get_0\n"
+      "local.set %0\n"
+      : "=r"(sp));
 #else
-	__asm__(
-		".globaltype __stack_pointer, i32\n"
-		"global.get __stack_pointer\n"
-		"local.set %0\n"
-		: "=r"(sp));
+  __asm__(".globaltype __stack_pointer, i32\n"
+          "global.get __stack_pointer\n"
+          "local.set %0\n"
+          : "=r"(sp));
 #endif
-	return sp;
+  return sp;
 }
 
-static inline struct stack_bounds get_stack_bounds()
-{
-	struct stack_bounds bounds;
+static inline struct stack_bounds get_stack_bounds() {
+  struct stack_bounds bounds;
 
-	if (&__stack_high) {
-		bounds.base = &__stack_high;
-		bounds.size = &__stack_high - &__stack_low;
-	} else {
-		/* For non-pic, make a guess using the knowledge about
-		 * how wasm-ld lays out things. For pic, just give up.
-		 */
+  if (&__stack_high) {
+    bounds.base = &__stack_high;
+    bounds.size = &__stack_high - &__stack_low;
+  } else {
+    /* For non-pic, make a guess using the knowledge about
+     * how wasm-ld lays out things. For pic, just give up.
+     */
 #if !defined(__pic__)
-		unsigned char *sp = get_stack_pointer();
-		if (sp > &__global_base) {
-			bounds.base = &__heap_base;
-			bounds.size = &__heap_base - &__data_end;
-		} else {
-			bounds.base = &__global_base;
-			bounds.size = (size_t)&__global_base;
-		}
+    unsigned char *sp = get_stack_pointer();
+    if (sp > &__global_base) {
+      bounds.base = &__heap_base;
+      bounds.size = &__heap_base - &__data_end;
+    } else {
+      bounds.base = &__global_base;
+      bounds.size = (size_t)&__global_base;
+    }
 #else
-		bounds.base = 0;
-		bounds.size = 0;
+    bounds.base = 0;
+    bounds.size = 0;
 #endif
-	}
+  }
 
-	return bounds;
+  return bounds;
 }
 
-void __wasi_init_tp() {
-	__init_tp((void *)__get_tp());
-}
+void __wasi_init_tp() { __init_tp((void *)__get_tp()); }
 #endif
 
-int __init_tp(void *p)
-{
-	pthread_t td = p;
-	td->self = td;
+int __init_tp(void *p) {
+  pthread_t td = p;
+  td->self = td;
 #ifdef __wasilibc_unmodified_upstream
-	int r = __set_thread_area(TP_ADJ(p));
-	if (r < 0) return -1;
-	if (!r) libc.can_do_threads = 1;
-	td->detach_state = DT_JOINABLE;
-	td->tid = __syscall(SYS_set_tid_address, &__thread_list_lock);
+  int r = __set_thread_area(TP_ADJ(p));
+  if (r < 0)
+    return -1;
+  if (!r)
+    libc.can_do_threads = 1;
+  td->detach_state = DT_JOINABLE;
+  td->tid = __syscall(SYS_set_tid_address, &__thread_list_lock);
 #else
-	struct stack_bounds bounds = get_stack_bounds();
-	__default_stacksize =
-		bounds.size < DEFAULT_STACK_MAX ?
-		bounds.size : DEFAULT_STACK_MAX;
-	td->stack = bounds.base;
-	td->stack_size = bounds.size;
-	td->guard_size = 0;
+  struct stack_bounds bounds = get_stack_bounds();
+  __default_stacksize =
+      bounds.size < DEFAULT_STACK_MAX ? bounds.size : DEFAULT_STACK_MAX;
+  td->stack = bounds.base;
+  td->stack_size = bounds.size;
+  td->guard_size = 0;
 #if defined(__wasip3__)
-	td->detach_state = DT_JOINABLE;
-	td->tid = wasip3_thread_index();
+  td->detach_state = DT_JOINABLE;
+  td->tid = wasip3_thread_index();
 #elif defined(_REENTRANT)
-	td->detach_state = DT_JOINABLE;
-	/*
-	 * Initialize the TID to a value which doesn't conflict with
-	 * host-allocated TIDs, so that TID-based locks can work.
-	 *
-	 * Note:
-	 * - Host-allocated TIDs range from 1 to 0x1fffffff. (inclusive)
-	 * - __tl_lock and __lockfile uses TID 0 as "unlocked".
-	 * - __lockfile relies on the fact the most significant two bits
-	 *   of TIDs are 0.
-	 */
-	td->tid = 0x3fffffff;
+  td->detach_state = DT_JOINABLE;
+  /*
+   * Initialize the TID to a value which doesn't conflict with
+   * host-allocated TIDs, so that TID-based locks can work.
+   *
+   * Note:
+   * - Host-allocated TIDs range from 1 to 0x1fffffff. (inclusive)
+   * - __tl_lock and __lockfile uses TID 0 as "unlocked".
+   * - __lockfile relies on the fact the most significant two bits
+   *   of TIDs are 0.
+   */
+  td->tid = 0x3fffffff;
 #endif
 #endif
-#if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT)
-	td->locale = &libc.global_locale;
-	td->robust_list.head = &td->robust_list.head;
+#if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT) ||          \
+    defined(__wasip3__)
+  td->locale = &libc.global_locale;
+  td->robust_list.head = &td->robust_list.head;
 #endif
-	td->sysinfo = __sysinfo;
-	td->next = td->prev = td;
-	return 0;
+  td->sysinfo = __sysinfo;
+  td->next = td->prev = td;
+  return 0;
 }
 
 #ifdef __wasilibc_unmodified_upstream
 
 static struct builtin_tls {
-	char c;
-	struct pthread pt;
-	void *space[16];
+  char c;
+  struct pthread pt;
+  void *space[16];
 } builtin_tls[1];
 #define MIN_TLS_ALIGN offsetof(struct builtin_tls, pt)
 
@@ -153,56 +151,55 @@ static struct tls_module main_tls;
 #endif
 
 #ifndef __wasilibc_unmodified_upstream
-extern void __wasm_init_tls(void*);
+extern void __wasm_init_tls(void *);
 #endif
 
-#if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT)
-void *__copy_tls(unsigned char *mem)
-{
+#if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT) ||          \
+    defined(__wasip3__)
+void *__copy_tls(unsigned char *mem) {
 #ifdef __wasilibc_unmodified_upstream
-	pthread_t td;
-	struct tls_module *p;
-	size_t i;
-	uintptr_t *dtv;
+  pthread_t td;
+  struct tls_module *p;
+  size_t i;
+  uintptr_t *dtv;
 
 #ifdef TLS_ABOVE_TP
-	dtv = (uintptr_t*)(mem + libc.tls_size) - (libc.tls_cnt + 1);
+  dtv = (uintptr_t *)(mem + libc.tls_size) - (libc.tls_cnt + 1);
 
-	mem += -((uintptr_t)mem + sizeof(struct pthread)) & (libc.tls_align-1);
-	td = (pthread_t)mem;
-	mem += sizeof(struct pthread);
+  mem += -((uintptr_t)mem + sizeof(struct pthread)) & (libc.tls_align - 1);
+  td = (pthread_t)mem;
+  mem += sizeof(struct pthread);
 
-	for (i=1, p=libc.tls_head; p; i++, p=p->next) {
-		dtv[i] = (uintptr_t)(mem + p->offset) + DTP_OFFSET;
-		memcpy(mem + p->offset, p->image, p->len);
-	}
+  for (i = 1, p = libc.tls_head; p; i++, p = p->next) {
+    dtv[i] = (uintptr_t)(mem + p->offset) + DTP_OFFSET;
+    memcpy(mem + p->offset, p->image, p->len);
+  }
 #else
-	dtv = (uintptr_t *)mem;
+  dtv = (uintptr_t *)mem;
 
-	mem += libc.tls_size - sizeof(struct pthread);
-	mem -= (uintptr_t)mem & (libc.tls_align-1);
-	td = (pthread_t)mem;
+  mem += libc.tls_size - sizeof(struct pthread);
+  mem -= (uintptr_t)mem & (libc.tls_align - 1);
+  td = (pthread_t)mem;
 
-	for (i=1, p=libc.tls_head; p; i++, p=p->next) {
-		dtv[i] = (uintptr_t)(mem - p->offset) + DTP_OFFSET;
-		memcpy(mem - p->offset, p->image, p->len);
-	}
+  for (i = 1, p = libc.tls_head; p; i++, p = p->next) {
+    dtv[i] = (uintptr_t)(mem - p->offset) + DTP_OFFSET;
+    memcpy(mem - p->offset, p->image, p->len);
+  }
 #endif
-	dtv[0] = libc.tls_cnt;
-	td->dtv = dtv;
-	return td;
+  dtv[0] = libc.tls_cnt;
+  td->dtv = dtv;
+  return td;
 #else
-	size_t tls_align = __builtin_wasm_tls_align();
-	mem += tls_align;
-	mem -= (uintptr_t)mem & (tls_align-1);
-	__wasm_init_tls(mem);
+  size_t tls_align = __builtin_wasm_tls_align();
+  mem += tls_align;
+  mem -= (uintptr_t)mem & (tls_align - 1);
+  __wasm_init_tls(mem);
 #ifndef __wasip3__
-	volatile void *tls_base = __builtin_wasm_tls_base();
-	__asm__("local.get %0\n"
-			"global.set __tls_base\n" 
-			::"r"(tls_base));
+  volatile void *tls_base = __builtin_wasm_tls_base();
+  __asm__("local.get %0\n"
+          "global.set __tls_base\n" ::"r"(tls_base));
 #endif
-	return mem;
+  return mem;
 #endif
 }
 #endif /* defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT) */
@@ -216,75 +213,72 @@ typedef Elf64_Phdr Phdr;
 
 extern weak hidden const size_t _DYNAMIC[];
 
-static void static_init_tls(size_t *aux)
-{
-	unsigned char *p;
-	size_t n;
-	Phdr *phdr, *tls_phdr=0;
-	size_t base = 0;
-	void *mem;
+static void static_init_tls(size_t *aux) {
+  unsigned char *p;
+  size_t n;
+  Phdr *phdr, *tls_phdr = 0;
+  size_t base = 0;
+  void *mem;
 
-	for (p=(void *)aux[AT_PHDR],n=aux[AT_PHNUM]; n; n--,p+=aux[AT_PHENT]) {
-		phdr = (void *)p;
-		if (phdr->p_type == PT_PHDR)
-			base = aux[AT_PHDR] - phdr->p_vaddr;
-		if (phdr->p_type == PT_DYNAMIC && _DYNAMIC)
-			base = (size_t)_DYNAMIC - phdr->p_vaddr;
-		if (phdr->p_type == PT_TLS)
-			tls_phdr = phdr;
-		if (phdr->p_type == PT_GNU_STACK &&
-		    phdr->p_memsz > __default_stacksize)
-			__default_stacksize =
-				phdr->p_memsz < DEFAULT_STACK_MAX ?
-				phdr->p_memsz : DEFAULT_STACK_MAX;
-	}
+  for (p = (void *)aux[AT_PHDR], n = aux[AT_PHNUM]; n;
+       n--, p += aux[AT_PHENT]) {
+    phdr = (void *)p;
+    if (phdr->p_type == PT_PHDR)
+      base = aux[AT_PHDR] - phdr->p_vaddr;
+    if (phdr->p_type == PT_DYNAMIC && _DYNAMIC)
+      base = (size_t)_DYNAMIC - phdr->p_vaddr;
+    if (phdr->p_type == PT_TLS)
+      tls_phdr = phdr;
+    if (phdr->p_type == PT_GNU_STACK && phdr->p_memsz > __default_stacksize)
+      __default_stacksize =
+          phdr->p_memsz < DEFAULT_STACK_MAX ? phdr->p_memsz : DEFAULT_STACK_MAX;
+  }
 
-	if (tls_phdr) {
-		main_tls.image = (void *)(base + tls_phdr->p_vaddr);
-		main_tls.len = tls_phdr->p_filesz;
-		main_tls.size = tls_phdr->p_memsz;
-		main_tls.align = tls_phdr->p_align;
-		libc.tls_cnt = 1;
-		libc.tls_head = &main_tls;
-	}
+  if (tls_phdr) {
+    main_tls.image = (void *)(base + tls_phdr->p_vaddr);
+    main_tls.len = tls_phdr->p_filesz;
+    main_tls.size = tls_phdr->p_memsz;
+    main_tls.align = tls_phdr->p_align;
+    libc.tls_cnt = 1;
+    libc.tls_head = &main_tls;
+  }
 
-	main_tls.size += (-main_tls.size - (uintptr_t)main_tls.image)
-		& (main_tls.align-1);
+  main_tls.size +=
+      (-main_tls.size - (uintptr_t)main_tls.image) & (main_tls.align - 1);
 #ifdef TLS_ABOVE_TP
-	main_tls.offset = GAP_ABOVE_TP;
-	main_tls.offset += (-GAP_ABOVE_TP + (uintptr_t)main_tls.image)
-		& (main_tls.align-1);
+  main_tls.offset = GAP_ABOVE_TP;
+  main_tls.offset +=
+      (-GAP_ABOVE_TP + (uintptr_t)main_tls.image) & (main_tls.align - 1);
 #else
-	main_tls.offset = main_tls.size;
+  main_tls.offset = main_tls.size;
 #endif
-	if (main_tls.align < MIN_TLS_ALIGN) main_tls.align = MIN_TLS_ALIGN;
+  if (main_tls.align < MIN_TLS_ALIGN)
+    main_tls.align = MIN_TLS_ALIGN;
 
-	libc.tls_align = main_tls.align;
-	libc.tls_size = 2*sizeof(void *) + sizeof(struct pthread)
+  libc.tls_align = main_tls.align;
+  libc.tls_size = 2 * sizeof(void *) + sizeof(struct pthread)
 #ifdef TLS_ABOVE_TP
-		+ main_tls.offset
+                      + main_tls.offset
 #endif
-		+ main_tls.size + main_tls.align
-		+ MIN_TLS_ALIGN-1 & -MIN_TLS_ALIGN;
+                      + main_tls.size + main_tls.align + MIN_TLS_ALIGN - 1 &
+                  -MIN_TLS_ALIGN;
 
-	if (libc.tls_size > sizeof builtin_tls) {
+  if (libc.tls_size > sizeof builtin_tls) {
 #ifndef SYS_mmap2
 #define SYS_mmap2 SYS_mmap
 #endif
-		mem = (void *)__syscall(
-			SYS_mmap2,
-			0, libc.tls_size, PROT_READ|PROT_WRITE,
-			MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
-		/* -4095...-1 cast to void * will crash on dereference anyway,
-		 * so don't bloat the init code checking for error codes and
-		 * explicitly calling a_crash(). */
-	} else {
-		mem = builtin_tls;
-	}
+    mem = (void *)__syscall(SYS_mmap2, 0, libc.tls_size, PROT_READ | PROT_WRITE,
+                            MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    /* -4095...-1 cast to void * will crash on dereference anyway,
+     * so don't bloat the init code checking for error codes and
+     * explicitly calling a_crash(). */
+  } else {
+    mem = builtin_tls;
+  }
 
-	/* Failure to initialize thread pointer is always fatal. */
-	if (__init_tp(__copy_tls(mem)) < 0)
-		a_crash();
+  /* Failure to initialize thread pointer is always fatal. */
+  if (__init_tp(__copy_tls(mem)) < 0)
+    a_crash();
 }
 
 weak_alias(static_init_tls, __init_tls);

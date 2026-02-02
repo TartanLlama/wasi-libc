@@ -2,6 +2,10 @@
 
 int pthread_cond_destroy(pthread_cond_t *c)
 {
+#ifdef __wasip3__
+	/* No-op for WASIP3 - waitlist-based condvars don't need cleanup */
+	return 0;
+#else
 	if (c->_c_shared && c->_c_waiters) {
 		int cnt;
 		a_or(&c->_c_waiters, 0x80000000);
@@ -11,4 +15,5 @@ int pthread_cond_destroy(pthread_cond_t *c)
 			__wait(&c->_c_waiters, 0, cnt, 0);
 	}
 	return 0;
+#endif
 }

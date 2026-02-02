@@ -24,8 +24,14 @@ static int i = 3;
 static int j = 0;
 static uint32_t *x = init+1;
 #if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT)
+#ifdef __wasip3__
+#include "lock.h"
+static struct __coop_lock lock[1] = {__COOP_LOCK_INIT};
+struct __coop_lock *const __random_lockptr = lock;
+#else
 static volatile int lock[1];
 volatile int *const __random_lockptr = lock;
+#endif
 #endif
 
 static uint32_t lcg31(uint32_t x) {

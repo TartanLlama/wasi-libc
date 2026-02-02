@@ -85,11 +85,13 @@ void wasip3_context_set_1(void* value);
 uint32_t wasip3_thread_yield_cancellable(void);
 uint32_t wasip3_thread_index(void);
 uint32_t wasip3_thread_new_indirect(void (*start_function)(void*), void* arg);
-void wasip3_thread_switch_to(uint32_t thread);
-uint32_t wasip3_thread_switch_to_cancellable(uint32_t thread);
-void wasip3_thread_resume_later(uint32_t thread);
-void wasip3_thread_yield_to(uint32_t thread);
-uint32_t wasip3_thread_yield_to_cancellable(uint32_t thread);
+void wasip3_thread_suspend_to(uint32_t thread);
+uint32_t wasip3_thread_suspend_to_cancellable(uint32_t thread);
+void wasip3_thread_suspend_to_suspended(uint32_t thread);
+uint32_t wasip3_thread_suspend_to_suspended_cancellable(uint32_t thread);
+void wasip3_thread_unsuspend(uint32_t thread);
+void wasip3_thread_yield_to_suspended(uint32_t thread);
+uint32_t wasip3_thread_yield_to_suspended_cancellable(uint32_t thread);
 void wasip3_thread_suspend(void);
 uint32_t wasip3_thread_suspend_cancellable(void);
 

@@ -1,5 +1,47 @@
 #include "pthread_impl.h"
 
+#ifdef __wasip3__
+
+/* WASIP3: Simplified cooperative implementation
+ * State: 0 = not run, 1 = running, 2 = completed */
+
+static struct {
+	pthread_once_t *control;
+	struct __waitlist_node *waiters;
+} once_state;
+
+int __pthread_once(pthread_once_t *control, void (*init)(void))
+{
+	/* Fast path: already completed */
+	if (*control == 2) {
+		return 0;
+	}
+	
+	/* Try to become the initializer */
+	if (*control == 0) {
+		*control = 1;
+		once_state.control = control;
+		
+		/* init may do something that blocks, in which case other threads
+		 * may try to run pthread_once on the same control. They will
+		 * see state 1 and wait on our waitlist. */
+		init();
+		
+		*control = 2;
+		__waitlist_wake_all(&once_state.waiters);
+		return 0;
+	}
+	
+	/* Another thread is initializing, wait for completion */
+	while (*control == 1) {
+		__waitlist_wait_on(&once_state.waiters);
+	}
+	
+	return 0;
+}
+
+#else
+
 static void undo(void *control)
 {
 	/* Wake all waiters, since the waiter status is lost when
@@ -46,5 +88,7 @@ int __pthread_once(pthread_once_t *control, void (*init)(void))
 	}
 	return __pthread_once_full(control, init);
 }
+
+#endif
 
 weak_alias(__pthread_once, pthread_once);

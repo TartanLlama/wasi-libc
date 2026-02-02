@@ -2,6 +2,30 @@
 #include "pthread_impl.h"
 #include <limits.h>
 
+#ifdef __wasip3__
+
+int ftrylockfile(FILE *f)
+{
+	uint32_t self_tid = wasip3_thread_index();
+	
+	if (f->lock.owner == self_tid) {
+		if (f->lockcount == LONG_MAX)
+			return -1;
+		f->lockcount++;
+		return 0;
+	}
+	
+	// Try to acquire the lock
+	if (f->lock.owner != 0)
+		return -1;
+	
+	f->lock.owner = self_tid;
+	f->lockcount = 1;
+	return 0;
+}
+
+#else
+
 void __do_orphaned_stdio_locks()
 {
 	FILE *f;
@@ -44,3 +68,5 @@ int ftrylockfile(FILE *f)
 	__register_locked_file(f, self);
 	return 0;
 }
+
+#endif

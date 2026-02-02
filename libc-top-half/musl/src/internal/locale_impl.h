@@ -1,9 +1,9 @@
 #ifndef _LOCALE_IMPL_H
 #define _LOCALE_IMPL_H
 
+#include "libc.h"
 #include <locale.h>
 #include <stdlib.h>
-#include "libc.h"
 #if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT)
 #include "pthread_impl.h"
 #endif
@@ -11,14 +11,19 @@
 #define LOCALE_NAME_MAX 23
 
 struct __locale_map {
-	const void *map;
-	size_t map_size;
-	char name[LOCALE_NAME_MAX+1];
-	const struct __locale_map *next;
+  const void *map;
+  size_t map_size;
+  char name[LOCALE_NAME_MAX + 1];
+  const struct __locale_map *next;
 };
 
 #if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT)
+#ifdef __wasip3__
+#include "lock.h"
+extern hidden struct __coop_lock __locale_lock[1];
+#else
 extern hidden volatile int __locale_lock[1];
+#endif
 #endif
 
 extern hidden const struct __locale_map __c_dot_utf8;
@@ -46,23 +51,24 @@ hidden char *__gettextdomain(void);
 #define LCTRANS(msg, lc, loc) __lctrans(msg, (loc)->cat[(lc)])
 #define LCTRANS_CUR(msg) __lctrans_cur(msg)
 
-#define C_LOCALE ((locale_t)&__c_locale)
-#define UTF8_LOCALE ((locale_t)&__c_dot_utf8_locale)
+#define C_LOCALE ((locale_t) & __c_locale)
+#define UTF8_LOCALE ((locale_t) & __c_dot_utf8_locale)
 
-#if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT)
+#if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT) ||          \
+    defined(__wasip3__)
 #define CURRENT_LOCALE (__pthread_self()->locale)
 
 #define CURRENT_UTF8 (!!__pthread_self()->locale->cat[LC_CTYPE])
 #else
 // If we haven't set up the current_local field yet, do so. Then return an
 // lvalue for the current_locale field.
-#define CURRENT_LOCALE \
-    (*({ \
-        if (!libc.current_locale) { \
-            libc.current_locale = &libc.global_locale; \
-        } \
-        &libc.current_locale; \
-    }))
+#define CURRENT_LOCALE                                                         \
+  (*({                                                                         \
+    if (!libc.current_locale) {                                                \
+      libc.current_locale = &libc.global_locale;                               \
+    }                                                                          \
+    &libc.current_locale;                                                      \
+  }))
 
 #define CURRENT_UTF8 (!!CURRENT_LOCALE->cat[LC_CTYPE])
 #endif

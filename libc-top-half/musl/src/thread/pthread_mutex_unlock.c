@@ -1,5 +1,36 @@
 #include "pthread_impl.h"
 
+#ifdef __wasip3__
+
+int __pthread_mutex_unlock(pthread_mutex_t *m)
+{
+	int tid = wasip3_thread_index();
+	int type = m->_m_type & 15;
+	
+	/* Check ownership */
+	if (m->_m_lock != tid) {
+		if (type == PTHREAD_MUTEX_ERRORCHECK) {
+			return EPERM;
+		}
+		/* Normal/recursive mutex: undefined behavior */
+		__builtin_trap();
+	}
+	
+	/* Handle recursive unlock */
+	if (type == PTHREAD_MUTEX_RECURSIVE && m->_m_count > 1) {
+		m->_m_count--;
+		return 0;
+	}
+	
+	/* Unlock */
+	m->_m_lock = 0;
+	m->_m_count = 0;
+	__waitlist_wake_one(&m->_m_waiters);
+	return 0;
+}
+
+#else
+
 int __pthread_mutex_unlock(pthread_mutex_t *m)
 {
 	pthread_t self;
@@ -56,5 +87,7 @@ int __pthread_mutex_unlock(pthread_mutex_t *m)
 		__wake(&m->_m_lock, 1, priv);
 	return 0;
 }
+
+#endif
 
 weak_alias(__pthread_mutex_unlock, pthread_mutex_unlock);

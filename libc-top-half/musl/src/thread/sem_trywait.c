@@ -4,10 +4,19 @@
 
 int sem_trywait(sem_t *sem)
 {
+#ifdef __wasip3__
+	if (sem->__count > 0) {
+		sem->__count--;
+		return 0;
+	}
+	errno = EAGAIN;
+	return -1;
+#else
 	int val;
 	while ((val=sem->__val[0]) & SEM_VALUE_MAX) {
 		if (a_cas(sem->__val, val, val-1)==val) return 0;
 	}
 	errno = EAGAIN;
 	return -1;
+#endif
 }

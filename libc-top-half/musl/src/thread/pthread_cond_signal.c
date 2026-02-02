@@ -1,5 +1,15 @@
 #include "pthread_impl.h"
 
+#ifdef __wasip3__
+
+int pthread_cond_signal(pthread_cond_t *c)
+{
+	__waitlist_wake_one(&c->_c_waiters);
+	return 0;
+}
+
+#else
+
 int pthread_cond_signal(pthread_cond_t *c)
 {
 	if (!c->_c_shared) return __private_cond_signal(c, 1);
@@ -8,3 +18,5 @@ int pthread_cond_signal(pthread_cond_t *c)
 	__wake(&c->_c_seq, 1, 0);
 	return 0;
 }
+
+#endif

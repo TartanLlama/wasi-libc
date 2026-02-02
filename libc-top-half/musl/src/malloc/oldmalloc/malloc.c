@@ -27,6 +27,17 @@ static struct {
 
 /* Synchronization tools */
 
+#ifdef __wasip3__
+/* WASIP3: Cooperative threading with no preemption means malloc is
+ * effectively atomic as long as it doesn't yield. No locks needed. */
+static inline void lock(volatile int *lk)
+{
+}
+
+static inline void unlock(volatile int *lk)
+{
+}
+#else
 static inline void lock(volatile int *lk)
 {
 	int need_locks = libc.need_locks;
@@ -43,6 +54,7 @@ static inline void unlock(volatile int *lk)
 		if (lk[1]) __wake(lk, 1, 1);
 	}
 }
+#endif
 
 static inline void lock_bin(int i)
 {

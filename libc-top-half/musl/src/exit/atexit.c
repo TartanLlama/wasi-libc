@@ -22,8 +22,14 @@ static struct fl
 static int slot;
 
 #if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT)
+#ifdef __wasip3__
+#include "pthread_impl.h"
+static struct __coop_lock lock[1] = {__COOP_LOCK_INIT};
+static struct __coop_lock *const __atexit_lockptr = lock;
+#else
 static volatile int lock[1];
 volatile int *const __atexit_lockptr = lock;
+#endif
 #endif
 
 void __funcs_on_exit()

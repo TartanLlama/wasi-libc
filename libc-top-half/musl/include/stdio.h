@@ -11,15 +11,15 @@ extern "C" {
 #define __NEED___isoc_va_list
 #define __NEED_size_t
 
-#ifdef __wasilibc_unmodified_upstream /* WASI doesn't need to define FILE as a complete type */
+#ifdef __wasilibc_unmodified_upstream /* WASI doesn't need to define FILE as a \
+                                         complete type */
 #if __STDC_VERSION__ < 201112L
 #define __NEED_struct__IO_FILE
 #endif
 #endif
 
-#if defined(_POSIX_SOURCE) || defined(_POSIX_C_SOURCE) \
- || defined(_XOPEN_SOURCE) || defined(_GNU_SOURCE) \
- || defined(_BSD_SOURCE)
+#if defined(_POSIX_SOURCE) || defined(_POSIX_C_SOURCE) ||                      \
+    defined(_XOPEN_SOURCE) || defined(_GNU_SOURCE) || defined(_BSD_SOURCE)
 #define __NEED_ssize_t
 #define __NEED_off_t
 #define __NEED_va_list
@@ -27,13 +27,14 @@ extern "C" {
 
 #include <bits/alltypes.h>
 
-#ifdef __wasilibc_unmodified_upstream /* Use the compiler's definition of NULL */
+#ifdef __wasilibc_unmodified_upstream /* Use the compiler's definition of NULL \
+                                       */
 #if __cplusplus >= 201103L
 #define NULL nullptr
 #elif defined(__cplusplus)
 #define NULL 0L
 #else
-#define NULL ((void*)0)
+#define NULL ((void *)0)
 #endif
 #else
 #define __need_NULL
@@ -67,16 +68,16 @@ extern "C" {
 #endif
 
 typedef union _G_fpos64_t {
-	char __opaque[16];
-	long long __lldata;
-	double __align;
+  char __opaque[16];
+  long long __lldata;
+  double __align;
 } fpos_t;
 
 extern FILE *const stdin;
 extern FILE *const stdout;
 extern FILE *const stderr;
 
-#define stdin  (stdin)
+#define stdin (stdin)
 #define stdout (stdout)
 #define stderr (stderr)
 
@@ -116,7 +117,8 @@ char *fgets(char *__restrict, int, FILE *__restrict);
 #ifdef __wasilibc_unmodified_upstream /* gets is obsolete */
 char *gets(char *);
 #else
-char *gets(char *) __attribute__((__deprecated__("gets is not defined on WASI")));
+char *gets(char *)
+    __attribute__((__deprecated__("gets is not defined on WASI")));
 #endif
 #endif
 
@@ -149,13 +151,14 @@ void setbuf(FILE *__restrict, char *__restrict);
 char *tmpnam(char *);
 FILE *tmpfile(void);
 #else
-char *tmpnam(char *) __attribute__((__deprecated__("tmpnam is not defined on WASI")));
-FILE *tmpfile(void) __attribute__((__deprecated__("tmpfile is not defined on WASI")));
+char *tmpnam(char *)
+    __attribute__((__deprecated__("tmpnam is not defined on WASI")));
+FILE *tmpfile(void)
+    __attribute__((__deprecated__("tmpfile is not defined on WASI")));
 #endif
 
-#if defined(_POSIX_SOURCE) || defined(_POSIX_C_SOURCE) \
- || defined(_XOPEN_SOURCE) || defined(_GNU_SOURCE) \
- || defined(_BSD_SOURCE)
+#if defined(_POSIX_SOURCE) || defined(_POSIX_C_SOURCE) ||                      \
+    defined(_XOPEN_SOURCE) || defined(_GNU_SOURCE) || defined(_BSD_SOURCE)
 FILE *fmemopen(void *__restrict, size_t, const char *__restrict);
 FILE *open_memstream(char **, size_t *);
 FILE *fdopen(int, const char *);
@@ -168,7 +171,8 @@ int fseeko(FILE *, off_t, int);
 off_t ftello(FILE *);
 int dprintf(int, const char *__restrict, ...);
 int vdprintf(int, const char *__restrict, __isoc_va_list);
-#if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT)
+#if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT) ||          \
+    defined(__wasip3__)
 void flockfile(FILE *);
 int ftrylockfile(FILE *);
 void funlockfile(FILE *);
@@ -184,10 +188,8 @@ char *ctermid(char *);
 #define L_ctermid 20
 #endif
 
-
 #ifdef __wasilibc_unmodified_upstream /* WASI has no temp directories */
-#if defined(_XOPEN_SOURCE) || defined(_GNU_SOURCE) \
- || defined(_BSD_SOURCE)
+#if defined(_XOPEN_SOURCE) || defined(_GNU_SOURCE) || defined(_BSD_SOURCE)
 #define P_tmpdir "/tmp"
 char *tempnam(const char *, const char *);
 #endif
@@ -218,16 +220,16 @@ int vasprintf(char **, const char *, __isoc_va_list);
 char *fgets_unlocked(char *, int, FILE *);
 int fputs_unlocked(const char *, FILE *);
 
-typedef ssize_t (cookie_read_function_t)(void *, char *, size_t);
-typedef ssize_t (cookie_write_function_t)(void *, const char *, size_t);
-typedef int (cookie_seek_function_t)(void *, off_t *, int);
-typedef int (cookie_close_function_t)(void *);
+typedef ssize_t(cookie_read_function_t)(void *, char *, size_t);
+typedef ssize_t(cookie_write_function_t)(void *, const char *, size_t);
+typedef int(cookie_seek_function_t)(void *, off_t *, int);
+typedef int(cookie_close_function_t)(void *);
 
 typedef struct _IO_cookie_io_functions_t {
-	cookie_read_function_t *read;
-	cookie_write_function_t *write;
-	cookie_seek_function_t *seek;
-	cookie_close_function_t *close;
+  cookie_read_function_t *read;
+  cookie_write_function_t *write;
+  cookie_seek_function_t *seek;
+  cookie_close_function_t *close;
 } cookie_io_functions_t;
 
 FILE *fopencookie(void *, const char *, cookie_io_functions_t);

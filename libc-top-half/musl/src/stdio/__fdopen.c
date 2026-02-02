@@ -75,7 +75,9 @@ FILE *__fdopen(int fd, const char *mode)
 	f->close = __stdio_close;
 
 #if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT)
+#ifndef __wasip3__
 	if (!libc.threaded) f->lock = -1;
+#endif
 #endif
 
 	/* Add new FILE to open file list */

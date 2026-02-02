@@ -99,7 +99,12 @@ static size_t preopen_capacity;
 /// Access to the the above preopen must be protected in the presence of
 /// threads.
 #ifdef _REENTRANT
+#ifdef __wasip3__
+#include "pthread_impl.h"
+static struct __coop_lock lock[1] = {__COOP_LOCK_INIT};
+#else
 static volatile int lock[1];
+#endif
 #endif
 
 #ifdef NDEBUG

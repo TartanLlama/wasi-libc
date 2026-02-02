@@ -130,7 +130,9 @@ FILE *fmemopen(void *restrict buf, size_t size, const char *restrict mode)
 	f->f.close = mclose;
 
 #if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT)
-	if (!libc.threaded) f->f.lock = -1;
+#ifndef __wasip3__
+	if (!libc.threaded) f->f.lock = __STDIO_LOCK_INIT;
+#endif
 #endif
 
 	return __ofl_add(&f->f);

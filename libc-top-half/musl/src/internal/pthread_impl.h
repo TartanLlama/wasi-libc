@@ -69,7 +69,7 @@ struct pthread {
 	char *dlerror_buf;
 	void *stdio_locks;
 	#ifdef __wasip3__
-	int joining_tid;
+	struct __waitlist_node *joiner_waiters;
 	#endif
 
 	/* Part 3 -- the positions of these fields relative to
@@ -96,6 +96,8 @@ enum {
 #define _a_sched __u.__i[3*__SU+1]
 #define _a_policy __u.__i[3*__SU+2]
 #define _a_prio __u.__i[3*__SU+3]
+
+#ifndef __wasip3__
 #define _m_type __u.__i[0]
 #define _m_lock __u.__vi[1]
 #define _m_waiters __u.__vi[2]
@@ -118,6 +120,7 @@ enum {
 #define _b_count __u.__vi[3]
 #define _b_waiters2 __u.__vi[4]
 #define _b_inst __u.__p[3]
+#endif
 
 #ifndef TP_OFFSET
 #define TP_OFFSET 0
@@ -177,35 +180,25 @@ hidden int __libc_sigaction(int, const struct sigaction *, struct sigaction *);
 #endif
 hidden void __unmapself(void *, size_t);
 
+#ifdef __wasip3__
+struct __waitlist_node {
+    uint32_t tid;
+    struct __waitlist_node *next;
+};
+hidden void __waitlist_wait_on(struct __waitlist_node **list);
+hidden void __waitlist_wake_one(struct __waitlist_node **list);
+hidden void __waitlist_wake_all(struct __waitlist_node **list);
+#else
+
 #ifndef __wasilibc_unmodified_upstream
 hidden int __wasilibc_futex_wait(volatile void *, int, int, int64_t);
 #endif
 hidden int __timedwait(volatile int *, int, clockid_t, const struct timespec *, int);
 hidden int __timedwait_cp(volatile int *, int, clockid_t, const struct timespec *, int);
 hidden void __wait(volatile int *, volatile int *, int, int);
-static inline void __wake(volatile void *addr, int cnt, int priv)
-{
-	if (priv) priv = FUTEX_PRIVATE;
-	if (cnt<0) cnt = INT_MAX;
-#ifdef __wasilibc_unmodified_upstream
-	__syscall(SYS_futex, addr, FUTEX_WAKE|priv, cnt) != -ENOSYS ||
-	__syscall(SYS_futex, addr, FUTEX_WAKE, cnt);
-#else
-#ifdef _REENTRANT
-	__builtin_wasm_memory_atomic_notify((int*)addr, cnt);
+hidden void __wake(volatile void *addr, int cnt, int priv);
+hidden void __futexwait(volatile void *addr, int val, int priv);
 #endif
-#endif
-}
-static inline void __futexwait(volatile void *addr, int val, int priv)
-{
-#ifdef __wasilibc_unmodified_upstream
-	if (priv) priv = FUTEX_PRIVATE;
-	__syscall(SYS_futex, addr, FUTEX_WAIT|priv, val, 0) != -ENOSYS ||
-	__syscall(SYS_futex, addr, FUTEX_WAIT, val, 0);
-#else
-	__wait(addr, NULL, val, priv);
-#endif
-}
 
 hidden void __acquire_ptc(void);
 hidden void __release_ptc(void);
@@ -218,6 +211,7 @@ hidden void __tl_sync(pthread_t);
 extern hidden volatile int __thread_list_lock;
 
 extern hidden volatile int __abort_lock[1];
+
 
 extern hidden unsigned __default_stacksize;
 extern hidden unsigned __default_guardsize;

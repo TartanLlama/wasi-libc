@@ -107,7 +107,11 @@ FILE *open_wmemstream(wchar_t **bufp, size_t *sizep)
 	f->f.close = wms_close;
 
 #if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT)
+#ifdef __wasip3__
+	/* lock is already zeroed by memset above */
+#else
 	if (!libc.threaded) f->f.lock = -1;
+#endif
 #endif
 
 	fwide(&f->f, 1);

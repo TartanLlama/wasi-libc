@@ -2,6 +2,40 @@
 #include <limits.h>
 #include "pthread_impl.h"
 
+#ifdef __wasip3__
+
+int sem_timedwait(sem_t *restrict sem, const struct timespec *restrict at)
+{
+	pthread_testcancel();
+	
+	/* Fast path: if permit is available, take it regardless of timeout */
+	if (sem->__count > 0) {
+		sem->__count--;
+		return 0;
+	}
+	
+	/* Would need to block, but timeouts not supported in cooperative threading.
+	 * There's no way to interrupt a suspended thread after a timeout. */
+	if (at) {
+		errno = ENOSYS;
+		return -1;
+	}
+	
+	/* Loop until we successfully acquire a permit */
+	while (sem->__count == 0) {
+		/* No permits available, wait on the waitlist */
+		__waitlist_wait_on(&sem->__waiters);
+		/* After waking, loop back to recheck - another thread
+		 * might have taken the permit before we ran. */
+	}
+	
+	/* Permit available, take it */
+	sem->__count--;
+	return 0;
+}
+
+#else
+
 static void cleanup(void *p)
 {
 	a_dec(p);
@@ -31,3 +65,5 @@ int sem_timedwait(sem_t *restrict sem, const struct timespec *restrict at)
 	}
 	return 0;
 }
+
+#endif

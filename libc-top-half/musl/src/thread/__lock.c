@@ -1,5 +1,38 @@
 #include "pthread_impl.h"
 
+#ifdef __wasip3__
+#include "lock.h"
+void __lock(struct __coop_lock *lock)
+{
+	int tid = wasip3_thread_index();
+	if (lock->owner == tid) {
+		/* Trap on recursive locking. */
+		__builtin_trap();
+	}
+
+	/* Loop until we acquire the lock. */
+	while (lock->owner != 0) {
+		__waitlist_wait_on(&lock->waiters);
+		/* After waking, the lock might still be held by another
+		 * thread that was scheduled before us, so loop back. */
+	}
+	
+	lock->owner = tid;
+}
+
+void __unlock(struct __coop_lock *lock)
+{
+	int tid = wasip3_thread_index();
+	if (lock->owner != tid) {
+		/* We're trying to unlock a lock we don't own. */
+		__builtin_trap();
+	}
+
+	lock->owner = 0;
+	/* Awake one waiter; the others will be resumed on future unlocks. */ 
+	__waitlist_wake_one(&lock->waiters);
+}
+#else
 /* This lock primitive combines a flag (in the sign bit) and a
  * congestion count (= threads inside the critical section, CS) in a
  * single int that is accessed through atomic operations. The states
@@ -60,3 +93,4 @@ void __unlock(volatile int *l)
 		}
 	}
 }
+#endif

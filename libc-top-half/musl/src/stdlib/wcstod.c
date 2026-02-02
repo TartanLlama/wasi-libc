@@ -43,7 +43,7 @@ static long double wcstox(const wchar_t *s, wchar_t **p, int prec)
 	f.flags = 0;
 	f.rpos = f.rend = f.buf = buf + 4;
 	f.buf_size = sizeof buf - 4;
-#if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT)
+#if !defined(__wasip3__) && (defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT))
 	f.lock = -1;
 #endif
 	f.read = do_read;

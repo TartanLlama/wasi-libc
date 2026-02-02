@@ -23,6 +23,11 @@ add_dependencies(musl-top-half-interface sysroot_inc)
 
 # Generates `bits/alltypes.h` from the input sed script.
 find_program(SED sed REQUIRED)
+if(__wasip3__)
+  set(WASIP3_DEFINE "#define __wasip3__ 1")
+else()
+  set(WASIP3_DEFINE "")
+endif()
 add_custom_command(
   OUTPUT ${SYSROOT_INC}/bits/alltypes.h
   COMMAND ${CMAKE_COMMAND} -E make_directory ${SYSROOT_INC}/bits
@@ -389,6 +394,12 @@ if (NOT (WASI STREQUAL "p1"))
   )
 endif()
 
+if (THREADS)
+  list(APPEND top_half_sources
+    musl/src/thread/__timedwait.c
+  )
+endif()
+
 if (THREADS OR (WASI STREQUAL "p3"))
   # pthreads functions needed for actual thread support
   list(APPEND top_half_sources
@@ -398,7 +409,6 @@ if (THREADS OR (WASI STREQUAL "p3"))
     musl/src/stdio/funlockfile.c
     musl/src/thread/__lock.c
     musl/src/thread/__wait.c
-    musl/src/thread/__timedwait.c
     musl/src/thread/pthread_barrier_destroy.c
     musl/src/thread/pthread_barrier_init.c
     musl/src/thread/pthread_barrier_wait.c

@@ -1,5 +1,26 @@
 #include "pthread_impl.h"
 
+#ifdef __wasip3__
+
+int __pthread_cond_timedwait(pthread_cond_t *restrict c, pthread_mutex_t *restrict m, const struct timespec *restrict ts)
+{
+	/* Timeouts not supported for blocking case */
+	if (ts) {
+		return ETIMEDOUT;
+	}
+	
+	/* Release mutex and wait on condition variable */
+	pthread_mutex_unlock(m);
+	__waitlist_wait_on(&c->_c_waiters);
+	
+	/* Re-acquire mutex */
+	return pthread_mutex_lock(m);
+}
+
+#else
+
+#include "pthread_impl.h"
+
 #ifndef __wasilibc_unmodified_upstream
 #include <common/clock.h>
 #endif
@@ -226,5 +247,6 @@ int __private_cond_signal(pthread_cond_t *c, int n)
 
 	return 0;
 }
+#endif
 
 weak_alias(__pthread_cond_timedwait, pthread_cond_timedwait);

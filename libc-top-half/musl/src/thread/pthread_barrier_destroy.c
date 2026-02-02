@@ -2,6 +2,10 @@
 
 int pthread_barrier_destroy(pthread_barrier_t *b)
 {
+#ifdef __wasip3__
+	/* No cleanup needed for WASIP3 barriers */
+	return 0;
+#else
 	if (b->_b_limit < 0) {
 		if (b->_b_lock) {
 			int v;
@@ -14,4 +18,5 @@ int pthread_barrier_destroy(pthread_barrier_t *b)
 #endif
 	}
 	return 0;
+#endif
 }

@@ -8,10 +8,17 @@
 
 #define UNGET 8
 
-#if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT)
+#if defined(__wasip3__)
+#include "lock.h"
+#define FFINALLOCK(f) __lockfile((f))
+#define FLOCK(f) int __need_unlock = __lockfile((f))
+#define FUNLOCK(f) do { if (__need_unlock) __unlockfile((f)); } while (0)
+#define __STDIO_LOCK_INIT {0, 0}
+#elif defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT)
 #define FFINALLOCK(f) ((f)->lock>=0 ? __lockfile((f)) : 0)
 #define FLOCK(f) int __need_unlock = ((f)->lock>=0 ? __lockfile((f)) : 0)
 #define FUNLOCK(f) do { if (__need_unlock) __unlockfile((f)); } while (0)
+#define __STDIO_LOCK_INIT -1
 #else
 // No locking needed.
 #define FFINALLOCK(f) ((void)(f))
@@ -50,7 +57,9 @@ struct _IO_FILE {
 	long lockcount;
 #endif
 	int mode;
-#if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT)
+#if defined(__wasip3__)
+	struct __coop_lock lock;
+#elif defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT)
 	volatile int lock;
 #endif
 	int lbf;

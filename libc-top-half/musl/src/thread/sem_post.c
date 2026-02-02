@@ -2,6 +2,30 @@
 #include <limits.h>
 #include "pthread_impl.h"
 
+#ifdef __wasip3__
+
+int sem_post(sem_t *sem)
+{
+	int val = sem->__count;
+	
+	if (val == SEM_VALUE_MAX) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	
+	/* Increment count */
+	sem->__count = val + 1;
+	
+	/* If count was negative (waiters present), wake one */
+	if (val < 0) {
+		__waitlist_wake_one(&sem->__waiters);
+	}
+	
+	return 0;
+}
+
+#else
+
 int sem_post(sem_t *sem)
 {
 	int val, new, waiters, priv = sem->__val[2];
@@ -19,3 +43,5 @@ int sem_post(sem_t *sem)
 	if (val<0) __wake(sem->__val, waiters>1 ? 1 : -1, priv);
 	return 0;
 }
+
+#endif
