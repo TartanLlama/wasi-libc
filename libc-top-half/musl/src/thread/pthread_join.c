@@ -25,6 +25,7 @@ static int __pthread_timedjoin_np(pthread_t t, void **res, const struct timespec
 	}
 	
 	__waitlist_wait_on(&t->joiner_waiters);
+
 	if (res) *res = t->result;
 	if (t->map_base) free(t->map_base);
 	return 0;

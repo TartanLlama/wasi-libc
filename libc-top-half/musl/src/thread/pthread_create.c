@@ -93,70 +93,6 @@ static void process_map_base_deferred_free() {
 #define __PTHREAD_EXIT_QUALIFIERS static
 #endif
 
-#ifdef __wasip3__
-__PTHREAD_EXIT_QUALIFIERS void __pthread_exit(void *result)
-{
-  pthread_t self = __pthread_self();
-
-  self->canceldisable = 1;
-  self->cancelasync = 0;
-  self->result = result;
-
-  // Run cleanup handlers
-  while (self->cancelbuf) {
-    void (*f)(void *) = self->cancelbuf->__f;
-    void *x = self->cancelbuf->__x;
-    self->cancelbuf = self->cancelbuf->__next;
-    f(x);
-  }
-
-  __pthread_tsd_run_dtors();
-
-  int state = self->detach_state;
-  if (state == DT_JOINABLE) {
-    self->detach_state = DT_EXITING;
-  }
-
-  // Clear tid
-  self->tid = 0;
-
-  // This is where we might process robust mutexes, but wasi-libc does not
-  // implement them.
-
-  __do_orphaned_stdio_locks();
-
-  // Update thread list
-  if (self->next == self) {
-    // Last thread, just exit
-    exit(0);
-  }
-
-  // Update thread count
-  libc.threads_minus_1--;
-
-  // Unlink from thread list
-  self->next->prev = self->prev;
-  self->prev->next = self->next;
-  self->prev = self->next = self;
-
-  // Handle detached thread cleanup
-  if (state == DT_DETACHED && self->map_base) {
-    free(self->map_base);
-    // Just return, let the thread exit naturally
-    return;
-  }
-
-  // Mark as exited
-  self->detach_state = DT_EXITED;
-
-  // Wake all joiners waiting on this thread
-  __waitlist_wake_all(&self->joiner_waiters);
-
-  // Thread will naturally exit when it returns
-}
-
-#else
-
 __PTHREAD_EXIT_QUALIFIERS void __pthread_exit(void *result)
 {
   pthread_t self = __pthread_self();
@@ -179,6 +115,12 @@ __PTHREAD_EXIT_QUALIFIERS void __pthread_exit(void *result)
   __block_app_sigs(&set);
 #endif
 
+  #ifdef __wasip3__
+  if (self->detach_state == DT_JOINABLE) {
+    self->detach_state = DT_EXITING;
+  }
+  int state = self->detach_state;
+  #else
   /* This atomic potentially competes with a concurrent pthread_detach
    * call; the loser is responsible for freeing thread resources. */
   int state = a_cas(&self->detach_state, DT_JOINABLE, DT_EXITING);
@@ -193,6 +135,7 @@ __PTHREAD_EXIT_QUALIFIERS void __pthread_exit(void *result)
 #endif
   }
 
+
   /* Access to target the exiting thread with syscalls that use
    * its kernel tid is controlled by killlock. For detached threads,
    * any use past this point would have undefined behavior, but for
@@ -203,13 +146,16 @@ __PTHREAD_EXIT_QUALIFIERS void __pthread_exit(void *result)
   /* The thread list lock must be AS-safe, and thus depends on
    * application signals being blocked above. */
   __tl_lock();
+  #endif
 
   /* If this is the only thread in the list, don't proceed with
    * termination of the thread, but restore the previous lock and
    * signal state to prepare for exit to call atexit handlers. */
   if (self->next == self) {
     __tl_unlock();
+#ifndef __wasip3__
     UNLOCK(self->killlock);
+#endif
     self->detach_state = state;
 #ifdef __wasilibc_unmodified_upstream
     __restore_sigs(&set);
@@ -227,7 +173,9 @@ __PTHREAD_EXIT_QUALIFIERS void __pthread_exit(void *result)
    * remaining locks (except thread list) are held if we end up
    * resetting need_locks below. */
   self->tid = 0;
+  #ifndef __wasip3__
   UNLOCK(self->killlock);
+  #endif
 
 #ifdef __wasilibc_unmodified_upstream
   /* Process robust list in userspace to handle non-pshared mutexes
@@ -235,6 +183,7 @@ __PTHREAD_EXIT_QUALIFIERS void __pthread_exit(void *result)
    * be invalid when the kernel would process it. */
   __vm_lock();
 #endif
+#ifndef __wasip3__
   volatile void *volatile *rp;
   while ((rp = self->robust_list.head) && rp != &self->robust_list.head) {
     pthread_mutex_t *m =
@@ -248,6 +197,7 @@ __PTHREAD_EXIT_QUALIFIERS void __pthread_exit(void *result)
     if (cont < 0 || waiters)
       __wake(&m->_m_lock, 1, priv);
   }
+#endif
 #ifdef __wasilibc_unmodified_upstream
   __vm_unlock();
 #endif
@@ -302,9 +252,14 @@ __PTHREAD_EXIT_QUALIFIERS void __pthread_exit(void *result)
   }
 #endif
 
+  #ifdef __wasip3__
+  self->detach_state = DT_EXITED;
+  __waitlist_wake_all(&self->joiner_waiters);
+  #else
   /* Wake any joiner. */
   a_store(&self->detach_state, DT_EXITED);
   __wake(&self->detach_state, 1, 1);
+  #endif
 
 #ifdef __wasilibc_unmodified_upstream
   for (;;)
@@ -321,8 +276,6 @@ __PTHREAD_EXIT_QUALIFIERS void __pthread_exit(void *result)
    */
 #endif
 }
-
-#endif
 
 void __do_cleanup_push(struct __ptcb *cb) {
   struct pthread *self = __pthread_self();
@@ -460,7 +413,9 @@ int __pthread_create(pthread_t *restrict res,
                    CLONE_THREAD | CLONE_SYSVSEM | CLONE_SETTLS |
                    CLONE_PARENT_SETTID | CLONE_CHILD_CLEARTID | CLONE_DETACHED;
 #endif
-  pthread_attr_t attr = {0};
+  // Marking this as volatile seems to prevent certain compiler optimizations
+  // that lead to incorrect code generation. TODO: investigate further.
+  volatile pthread_attr_t attr = {0};
   sigset_t set;
 #ifndef __wasilibc_unmodified_upstream
   size_t tls_size = __builtin_wasm_tls_size();
@@ -478,6 +433,7 @@ int __pthread_create(pthread_t *restrict res,
     return ENOSYS;
 #endif
   self = __pthread_self();
+  
   if (!libc.threaded) {
     for (FILE *f = *__ofl_lock(); f; f = f->next)
       init_file_lock(f);
@@ -585,17 +541,18 @@ int __pthread_create(pthread_t *restrict res,
   new = __copy_tls(tsd - libc.tls_size);
 #else
   new_tls_base = __copy_tls(tsd - tls_size);
-  tls_offset = new_tls_base - tls_base;
-  new = (void *)((uintptr_t)self + tls_offset);
+  /* Compute pthread struct offset from old TLS base, apply to new TLS base */
+  tls_offset = (uintptr_t)self - (uintptr_t)tls_base;
+  new = (void *)((uintptr_t)new_tls_base + tls_offset);
 #endif
   new->map_base = map;
   new->map_size = size;
   new->stack = stack;
   new->stack_size = stack - stack_limit;
   new->guard_size = guard;
-  new->self = new;
   new->tsd = (void *)tsd;
   new->locale = &libc.global_locale;
+  new->self = new;
   if (attr._a_detach) {
     new->detach_state = DT_DETACHED;
   } else {
