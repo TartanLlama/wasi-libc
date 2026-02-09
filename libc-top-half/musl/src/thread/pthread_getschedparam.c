@@ -1,6 +1,12 @@
 #include "pthread_impl.h"
 #include "lock.h"
 
+#ifdef __wasip3__
+int pthread_getschedparam(pthread_t t, int *restrict policy, struct sched_param *restrict param)
+{
+    return ENOTSUP;
+}
+#else
 int pthread_getschedparam(pthread_t t, int *restrict policy, struct sched_param *restrict param)
 {
 	int r;
@@ -19,3 +25,4 @@ int pthread_getschedparam(pthread_t t, int *restrict policy, struct sched_param 
 	__restore_sigs(&set);
 	return r;
 }
+#endif

@@ -21,7 +21,8 @@
 #define JT_MQ_PRIO_MAX JT(3)
 #endif
 #define JT_PAGE_SIZE JT(4)
-#ifdef __wasilibc_unmodified_upstream // WASI has no semaphores
+// wasi-threads has no semaphores
+#if defined(__wasilibc_unmodified_upstream) || defined(__WASI_THREADS_COOPERATIVE__) 
 #define JT_SEM_VALUE_MAX JT(5)
 #endif
 #define JT_NPROCESSORS_CONF JT(6)
@@ -64,7 +65,9 @@ long sysconf(int name) {
       [_SC_PRIORITIZED_IO] = -1,
       [_SC_SYNCHRONIZED_IO] = -1,
       [_SC_FSYNC] = VER,
+#ifdef __wasilibc_unmodified_upstream // WASI has no mmap
       [_SC_MAPPED_FILES] = VER,
+#endif
       [_SC_MEMLOCK] = VER,
       [_SC_MEMLOCK_RANGE] = VER,
       [_SC_MEMORY_PROTECTION] = VER,
@@ -87,7 +90,9 @@ long sysconf(int name) {
       // Not supported on wasi.
       [_SC_RTSIG_MAX] = -1,
 #endif
-#ifdef __wasilibc_unmodified_upstream // WASI has no semaphores
+      // wasi-threads has no semaphores, but they are implemented in cooperative
+      // threading mode.
+#if defined(__wasilibc_unmodified_upstream) || defined(__WASI_THREADS_COOPERATIVE__) 
       [_SC_SEM_NSEMS_MAX] = SEM_NSEMS_MAX,
       [_SC_SEM_VALUE_MAX] = JT_SEM_VALUE_MAX,
 #else
@@ -125,8 +130,7 @@ long sysconf(int name) {
       [_SC_GETPW_R_SIZE_MAX] = -1,
       [_SC_LOGIN_NAME_MAX] = 256,
       [_SC_TTY_NAME_MAX] = TTY_NAME_MAX,
-#if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT) ||          \
-    defined(__wasip3__)
+#if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT)
       [_SC_THREAD_DESTRUCTOR_ITERATIONS] = PTHREAD_DESTRUCTOR_ITERATIONS,
       [_SC_THREAD_KEYS_MAX] = PTHREAD_KEYS_MAX,
       [_SC_THREAD_STACK_MIN] = PTHREAD_STACK_MIN,
@@ -138,10 +142,12 @@ long sysconf(int name) {
       [_SC_THREAD_THREADS_MAX] = -1,
       [_SC_THREAD_ATTR_STACKADDR] = VER,
       [_SC_THREAD_ATTR_STACKSIZE] = VER,
+#if defined(__wasilibc_unmodified_upstream)
       [_SC_THREAD_PRIORITY_SCHEDULING] = VER,
       [_SC_THREAD_PRIO_INHERIT] = -1,
       [_SC_THREAD_PRIO_PROTECT] = -1,
       [_SC_THREAD_PROCESS_SHARED] = VER,
+#endif
       [_SC_NPROCESSORS_CONF] = JT_NPROCESSORS_CONF,
       [_SC_NPROCESSORS_ONLN] = JT_NPROCESSORS_ONLN,
       [_SC_PHYS_PAGES] = JT_PHYS_PAGES,

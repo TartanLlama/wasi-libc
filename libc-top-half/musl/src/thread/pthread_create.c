@@ -87,7 +87,7 @@ static void process_map_base_deferred_free() {
 }
 #endif
 
-#ifdef __wasilibc_unmodified_upstream
+#if defined(__wasilibc_unmodified_upstream)
 #define __PTHREAD_EXIT_QUALIFIERS _Noreturn
 #else
 #define __PTHREAD_EXIT_QUALIFIERS static
@@ -264,7 +264,6 @@ __PTHREAD_EXIT_QUALIFIERS void __pthread_exit(void *result)
 #ifdef __wasilibc_unmodified_upstream
   for (;;)
     __syscall(SYS_exit, 0);
-#else
   // Can't use `exit()` here, because it is too high level
 
   /* On Linux, the thread is created with CLONE_CHILD_CLEARTID,
@@ -343,11 +342,7 @@ static int start_c11(void *p) {
  * wasip3_thread_start is used indirectly via a wasm export.
  */
 void wasip3_thread_start(void *context);
-void __wasm_init_task();
-void __wasm_init_async_task();
 hidden void *__dummy_reference = wasip3_thread_start;
-hidden void *__wasm_init_task_reference = __wasm_init_task;
-hidden void *__wasm_init_async_task_reference = __wasm_init_async_task;
 
 hidden void __wasip3_thread_start_C(int tid, void *context) {
   struct start_args *args = context;
@@ -693,7 +688,7 @@ fail:
   return EAGAIN;
 }
 
-#ifdef __wasilibc_unmodified_upstream
+#if defined(__wasilibc_unmodified_upstream)
 weak_alias(__pthread_exit, pthread_exit);
 #endif
 weak_alias(__pthread_create, pthread_create);

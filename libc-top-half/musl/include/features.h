@@ -1,6 +1,8 @@
 #ifndef _FEATURES_H
 #define _FEATURES_H
 
+#include <wasi/version.h>
+
 #if defined(_ALL_SOURCE) && !defined(_GNU_SOURCE)
 #define _GNU_SOURCE 1
 #endif
@@ -36,5 +38,9 @@
 #endif
 
 #define __REDIR(x,y) __typeof__(x) x __asm__(#y)
+
+#ifdef __wasip3__
+#define __WASI_THREADS_COOPERATIVE__ 1
+#endif
 
 #endif

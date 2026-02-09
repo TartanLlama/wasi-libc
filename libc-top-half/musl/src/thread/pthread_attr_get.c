@@ -39,6 +39,28 @@ int pthread_attr_getscope(const pthread_attr_t *restrict a, int *restrict scope)
 	*scope = PTHREAD_SCOPE_SYSTEM;
 	return 0;
 }
+#elif defined(__WASI_THREADS_COOPERATIVE__) 
+int pthread_attr_getinheritsched(const pthread_attr_t *restrict a, int *restrict inherit)
+{
+	return ENOTSUP;
+}
+
+int pthread_attr_getschedparam(const pthread_attr_t *restrict a, struct sched_param *restrict param)
+{
+	param->sched_priority = 0;
+	return 0;
+}
+
+int pthread_attr_getschedpolicy(const pthread_attr_t *restrict a, int *restrict policy)
+{
+	return ENOTSUP;
+}
+
+int pthread_attr_getscope(const pthread_attr_t *restrict a, int *restrict scope)
+{
+	*scope = PTHREAD_SCOPE_SYSTEM;
+	return 0;
+}
 #else
 int pthread_attr_getschedparam(const pthread_attr_t *restrict a, struct sched_param *restrict param)
 {

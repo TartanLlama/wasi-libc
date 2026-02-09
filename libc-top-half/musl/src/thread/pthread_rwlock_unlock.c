@@ -11,8 +11,8 @@ int __pthread_rwlock_unlock(pthread_rwlock_t *rw)
 			/* Last reader, wake waiting writers */
 			__waitlist_wake_all(&rw->_rw_waiters);
 		}
-	} else if (rw->_rw_lock == -1) {
-		/* Releasing write lock */
+	} else if (rw->_rw_lock < 0) {
+		/* Releasing write lock (stored as -tid) */
 		rw->_rw_lock = 0;
 		/* Wake all waiters (readers and writers compete) */
 		__waitlist_wake_all(&rw->_rw_waiters);

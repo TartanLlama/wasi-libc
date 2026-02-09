@@ -21,16 +21,17 @@ int sem_timedwait(sem_t *restrict sem, const struct timespec *restrict at)
 		return -1;
 	}
 	
-	/* Loop until we successfully acquire a permit */
-	while (sem->__count == 0) {
+	/* Decrement count to indicate we're waiting (goes negative) */
+	sem->__count--;
+	
+	/* Loop until a permit becomes available */
+	while (sem->__count < 0) {
 		/* No permits available, wait on the waitlist */
 		__waitlist_wait_on(&sem->__waiters);
-		/* After waking, loop back to recheck - another thread
-		 * might have taken the permit before we ran. */
+		/* After waking, recheck - another thread might have taken the permit */
 	}
 	
-	/* Permit available, take it */
-	sem->__count--;
+	/* We've been given a permit (count incremented by sem_post) */
 	return 0;
 }
 

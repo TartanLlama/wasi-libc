@@ -12,8 +12,15 @@ weak_alias(dummy1, __tl_sync);
 static int __pthread_timedjoin_np(pthread_t t, void **res, const struct timespec *at)
 {
 #ifdef __wasip3__
+	int state = t->detach_state;
+	
+	/* Cannot join a detached thread */
+	if (state >= DT_DETACHED) {
+		return EINVAL;
+	}
+	
 	/* If already exited, just return the result */
-	if (t->detach_state == DT_EXITED) {
+	if (state == DT_EXITED) {
 		if (res) *res = t->result;
 		if (t->map_base) free(t->map_base);
 		return 0;

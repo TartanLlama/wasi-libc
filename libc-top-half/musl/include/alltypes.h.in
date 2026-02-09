@@ -121,7 +121,7 @@ TYPEDEF struct { union { int __i[12]; volatile int __vi[12]; void *__p[12*sizeof
 #endif
 TYPEDEF struct { union { int __i[12]; volatile int __vi[12]; void *__p[12*sizeof(int)/sizeof(void*)]; } __u; } cnd_t;
 #ifdef __wasip3__
-TYPEDEF struct { int _rw_lock; struct __waitlist_node *_rw_waiters; } pthread_rwlock_t;
+TYPEDEF struct { long long _rw_lock; struct __waitlist_node *_rw_waiters; } pthread_rwlock_t;
 #else
 TYPEDEF struct { union { int __i[sizeof(long)==8?14:8]; volatile int __vi[sizeof(long)==8?14:8]; void *__p[sizeof(long)==8?7:8]; } __u; } pthread_rwlock_t;
 #endif

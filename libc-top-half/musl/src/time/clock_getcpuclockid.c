@@ -5,6 +5,9 @@
 
 int clock_getcpuclockid(pid_t pid, clockid_t *clk)
 {
+	#ifdef __WASI_THREADS_COOPERATIVE__
+	return ENOTSUP;
+	#else
 	struct timespec ts;
 	clockid_t id = (-pid-1)*8U + 2;
 	int ret = __syscall(SYS_clock_getres, id, &ts);
@@ -12,4 +15,5 @@ int clock_getcpuclockid(pid_t pid, clockid_t *clk)
 	if (ret) return -ret;
 	*clk = id;
 	return 0;
+	#endif
 }

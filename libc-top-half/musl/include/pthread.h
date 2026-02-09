@@ -54,7 +54,7 @@ extern "C" {
 #define PTHREAD_PROCESS_PRIVATE 0
 #define PTHREAD_PROCESS_SHARED 1
 
-#ifdef __wasip3__
+#ifdef __WASI_THREADS_COOPERATIVE__
 #define PTHREAD_MUTEX_INITIALIZER {0, 0, 0, 0}
 #define PTHREAD_RWLOCK_INITIALIZER {0, 0}
 #define PTHREAD_COND_INITIALIZER {0}
@@ -79,14 +79,14 @@ extern "C" {
 
 #define PTHREAD_NULL ((pthread_t)0)
 
-#ifdef __wasilibc_unmodified_upstream
+#if defined(__wasilibc_unmodified_upstream) || defined(__WASI_THREADS_COOPERATIVE__)
 int pthread_create(pthread_t *__restrict, const pthread_attr_t *__restrict,
                    void *(*)(void *), void *__restrict);
 int pthread_detach(pthread_t);
 _Noreturn void pthread_exit(void *);
 int pthread_join(pthread_t, void **);
 #else
-#if defined(_REENTRANT) || defined(__wasip3__) || !defined(_WASI_STRICT_PTHREAD)
+#if defined(_REENTRANT) || !defined(_WASI_STRICT_PTHREAD)
 int pthread_create(pthread_t *__restrict, const pthread_attr_t *__restrict,
                    void *(*)(void *), void *__restrict);
 int pthread_detach(pthread_t);
@@ -132,12 +132,14 @@ int pthread_equal(pthread_t, pthread_t);
 int pthread_setcancelstate(int, int *);
 int pthread_setcanceltype(int, int *);
 void pthread_testcancel(void);
-#ifdef __wasilibc_unmodified_upstream /* WASI has no cancellation support. */
+/* wasi-threads takes the approach of not declaring unsupported functions.
+   For greater compatibility, we stub them for cooperative threading. */
+#if defined(__wasilibc_unmodified_upstream) || defined(__WASI_THREADS_COOPERATIVE__)  /* WASI has no cancellation support. */
 int pthread_cancel(pthread_t);
 #endif
 
-#ifdef __wasilibc_unmodified_upstream /* WASI has no CPU scheduling support.   \
-                                       */
+/* WASI has no CPU scheduling support. */
+#if defined(__wasilibc_unmodified_upstream) || defined(__WASI_THREADS_COOPERATIVE__) 
 int pthread_getschedparam(pthread_t, int *__restrict,
                           struct sched_param *__restrict);
 int pthread_setschedparam(pthread_t, int, const struct sched_param *);
@@ -219,8 +221,7 @@ int pthread_attr_setscope(pthread_attr_t *, int);
 int pthread_attr_getschedpolicy(const pthread_attr_t *__restrict,
                                 int *__restrict);
 int pthread_attr_setschedpolicy(pthread_attr_t *, int);
-#ifdef __wasilibc_unmodified_upstream /* WASI has no CPU scheduling support.   \
-                                       */
+#if defined(__wasilibc_unmodified_upstream) || defined(__WASI_THREADS_COOPERATIVE__) /* WASI has no CPU scheduling support. */
 int pthread_attr_getschedparam(const pthread_attr_t *__restrict,
                                struct sched_param *__restrict);
 int pthread_attr_setschedparam(pthread_attr_t *__restrict,

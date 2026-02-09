@@ -1,12 +1,18 @@
 #include "pthread_impl.h"
 
 #ifdef __wasip3__
-
 int __pthread_rwlock_timedwrlock(pthread_rwlock_t *restrict rw, const struct timespec *restrict at)
 {
+	int tid = wasip3_thread_index();
+	
+	/* Check for deadlock: trying to write-lock already owned write lock */
+	if (rw->_rw_lock == -tid) {
+		return EDEADLK;
+	}
+	
 	/* Fast path: if no readers or writers, acquire write lock */
 	if (rw->_rw_lock == 0) {
-		rw->_rw_lock = -1;  /* -1 indicates write lock */
+		rw->_rw_lock = -tid;  /* -tid indicates write lock owned by this thread */
 		return 0;
 	}
 	
@@ -21,8 +27,8 @@ int __pthread_rwlock_timedwrlock(pthread_rwlock_t *restrict rw, const struct tim
 		__waitlist_wait_on(&rw->_rw_waiters);
 	}
 	
-	/* Acquired, mark as write-locked */
-	rw->_rw_lock = -1;
+	/* Acquired, mark as write-locked with owner */
+	rw->_rw_lock = -tid;
 	return 0;
 }
 

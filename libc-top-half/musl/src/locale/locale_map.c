@@ -33,8 +33,8 @@ static const char envvars[][12] = {
 #if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT)
 #ifdef __wasip3__
 #include "pthread_impl.h"
-static struct __coop_lock lock[1] = {__COOP_LOCK_INIT};
-static struct __coop_lock *const __locale_lockptr = lock;
+struct __coop_lock __locale_lock[1] = {__COOP_LOCK_INIT};
+struct __coop_lock *const __locale_lockptr = __locale_lock;
 #else
 volatile int __locale_lock[1];
 volatile int *const __locale_lockptr = __locale_lock;

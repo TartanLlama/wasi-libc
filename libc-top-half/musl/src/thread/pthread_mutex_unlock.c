@@ -9,10 +9,10 @@ int __pthread_mutex_unlock(pthread_mutex_t *m)
 	
 	/* Check ownership */
 	if (m->_m_lock != tid) {
-		if (type == PTHREAD_MUTEX_ERRORCHECK) {
+		if (type == PTHREAD_MUTEX_ERRORCHECK || type == PTHREAD_MUTEX_RECURSIVE) {
 			return EPERM;
 		}
-		/* Normal/recursive mutex: undefined behavior */
+		/* Normal mutex: undefined behavior */
 		__builtin_trap();
 	}
 	

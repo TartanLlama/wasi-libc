@@ -2,6 +2,15 @@
 #include <stdint.h>
 #include "libc.h"
 
+#ifdef __wasip3__
+/* Ensure __wasm_init_task and __wasm_init_async_task are always linked.
+ *  These assembly functions are required for wasip3 initialization. */
+void __wasm_init_task(void);
+void __wasm_init_async_task(void);
+__attribute__((used)) hidden static void *__wasm_init_task_reference = __wasm_init_task;
+__attribute__((used)) hidden static void *__wasm_init_async_task_reference = __wasm_init_async_task;
+#endif
+
 static void dummy()
 {
 }

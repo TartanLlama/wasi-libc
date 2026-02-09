@@ -8,6 +8,7 @@
 #include <wasi/api.h>
 #include <errno.h>
 #include <time.h>
+#include <sched.h>
 
 #ifdef __wasip1__
 static_assert(TIMER_ABSTIME == __WASI_SUBCLOCKFLAGS_SUBSCRIPTION_CLOCK_ABSTIME,
@@ -58,6 +59,7 @@ int clock_nanosleep(clockid_t clock_id, int flags, const struct timespec *rqtp,
   return 0;
 #elif defined(__wasip3__)
   // TODO(wasip3)
+  sched_yield();
   errno = ENOTSUP;
   return -1;
 #else
