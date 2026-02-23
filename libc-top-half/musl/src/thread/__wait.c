@@ -3,6 +3,7 @@
 #include "assert.h"
 #endif
 
+#ifndef __wasip3__
 #ifndef __wasilibc_unmodified_upstream
 
 weak int __wasilibc_futex_wait_maybe_busy(volatile void *addr, int op, int val, int64_t max_wait_ns);
@@ -44,9 +45,9 @@ int __wasilibc_futex_wait(volatile void *addr, int op, int val, int64_t max_wait
     return __wasilibc_futex_wait_atomic_wait(addr, op, val, max_wait_ns);
 }
 #endif
+#endif
 
 #ifdef __wasip3__
-#include <wasi/api.h>
 
 void __waitlist_wait_on(struct __waitlist_node **list)
 {
@@ -88,7 +89,7 @@ void __waitlist_wake_all(struct __waitlist_node **list)
         curr = *prev;
     }
 }
-#endif
+#else
 
 void __wait(volatile int *addr, volatile int *waiters, int val, int priv)
 {
@@ -134,3 +135,4 @@ void __futexwait(volatile void *addr, int val, int priv)
 	__wait(addr, NULL, val, priv);
 #endif
 }
+#endif

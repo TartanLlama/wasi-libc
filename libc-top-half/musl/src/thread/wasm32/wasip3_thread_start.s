@@ -1,4 +1,4 @@
-	.text
+    .text
 
 	.export_name	wasip3_thread_start, wasip3_thread_start
 
