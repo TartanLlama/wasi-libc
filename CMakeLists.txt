@@ -26,6 +26,15 @@ if (CMAKE_HOST_WIN32)
   set(CMAKE_INCLUDE_SYSTEM_FLAG_C "-isystem ")
 endif()
 
+set(TARGET_TRIPLE "wasm32-wasip1" CACHE STRING "WASI target to test")
+set(CMAKE_C_COMPILER_TARGET ${TARGET_TRIPLE})
+
+# We're building libc, and the compiler being used may not have a wasm sysroot
+# for libc, so skip this check. Otherwise the `project` call below attempts a
+# link to see if the compiler is working and if that fails it doesn't mean it
+# doesn't work. Let the build keep going to see what happens.
+set(CMAKE_C_COMPILER_WORKS 1)
+
 project(wasi-libc LANGUAGES C ASM)
 
 if(NOT CMAKE_C_COMPILER_ID MATCHES Clang)
@@ -36,12 +45,11 @@ message(STATUS "Found executable for `nm`: ${CMAKE_NM}")
 message(STATUS "Found executable for `ar`: ${CMAKE_AR}")
 message(STATUS "Found executable for `ranlib`: ${CMAKE_RANLIB}")
 
-set(TARGET_TRIPLE "wasm32-wasip1" CACHE STRING "WASI target to test")
 # Note: thin LTO here is just for experimentation. It has known issues:
 # - https://github.com/llvm/llvm-project/issues/91700
 # - https://github.com/llvm/llvm-project/issues/91711
 set(LTO "" CACHE STRING "LTO mode to use")
-set(MALLOC "dlmalloc" CACHE STRING "Malloc implementation to use (dlmalloc, jemalloc, or none)")
+set(MALLOC "dlmalloc" CACHE STRING "Malloc implementation to use (dlmalloc, emmalloc, or none)")
 set(BUILTINS_LIB "" CACHE STRING "Path to precompiled compiler-rt builtins library")
 set(BULK_MEMORY_THRESHOLD "32" CACHE STRING "Threshold to compile code with")
 option(SETJMP "Build setjmp/longjmp support" ON)
@@ -49,6 +57,9 @@ option(BUILD_TESTS "Whether or not to build tests" OFF)
 option(SIMD "Whether or not to build simd-enabled intrinsics into wasi-libc" OFF)
 option(BUILD_SHARED "Whether or not to build shared libraries" ON)
 option(CHECK_SYMBOLS "Whether or not to check the exported symbols of libc.a" OFF)
+set(WASI_SDK_VERSION "" CACHE STRING "Version information for wasi-sdk to embed in headers")
+option(ENABLE_WERROR "Whether to compile with `-Werror`" OFF)
+option(ENABLE_COOP_THREADS "Whether to compile with cooperative threads support" OFF)
 
 if(TARGET_TRIPLE MATCHES "-threads$")
   set(WASI p1)
@@ -64,8 +75,9 @@ elseif(TARGET_TRIPLE MATCHES "-wasip1$")
   set(SHARED ON)
 elseif(TARGET_TRIPLE MATCHES "-wasip2$")
   set(WASI p2)
-  set(__wasilibc_use_wasip2 ON)
-  add_compile_definitions(-D__wasilibc_use_wasip2)
+  set(SHARED ON)
+elseif(TARGET_TRIPLE MATCHES "-wasip3$")
+  set(WASI p3)
   set(SHARED ON)
 else()
   message(FATAL_ERROR "Unknown WASI target triple: ${TARGET_TRIPLE}")
@@ -83,10 +95,10 @@ else()
 endif()
 
 if(TARGET_TRIPLE MATCHES "-threads$")
-  set(THREADS ON)
   add_compile_options(-mthread-model posix -pthread -ftls-model=local-exec -matomics)
+elseif(ENABLE_COOP_THREADS)
+  add_compile_options(-mthread-model posix -pthread -ftls-model=local-exec)
 else()
-  set(THREADS OFF)
   add_compile_options(-mthread-model single)
 endif()
 
@@ -117,8 +129,10 @@ if(LTO)
   set(SYSROOT_LIB ${SYSROOT_LIB}/llvm-lto/${clang_version})
   if(LTO STREQUAL "thin")
     add_compile_options(-flto=thin)
+    add_link_options(-flto=thin)
   elseif(LTO STREQUAL "full")
     add_compile_options(-flto)
+    add_link_options(-flto)
   else()
     message(FATAL_ERROR "Unknown LTO mode: ${LTO}")
   endif()
@@ -129,6 +143,19 @@ if(SIMD)
     -D__wasilibc_simd_string)
 endif()
 
+if(WASI STREQUAL "p1")
+  set(__wasip1__ ON)
+elseif(WASI STREQUAL "p2")
+  set(__wasip2__ ON)
+elseif(WASI STREQUAL "p3")
+  set(__wasip3__ ON)
+else()
+  message(FATAL_ERROR "Unknown WASI version: ${WASI}")
+endif()
+
+set(wasip2-version 0.2.0)
+set(wasip3-version 0.3.0)
+
 include(bindings)
 include(builtins)
 if (NOT (WASI STREQUAL "p1"))
@@ -136,6 +163,8 @@ if (NOT (WASI STREQUAL "p1"))
 endif()
 include(check-symbols)
 include(clang-format)
+include(wasm-tools)
+include(wasi-wits)
 
 # =============================================================================
 # Generic top-level build flags/settings
@@ -176,24 +205,40 @@ add_compile_options(
   # TODO: Add -fno-signaling-nans when the compiler supports it.
   -fno-trapping-math
 
-  # Add all warnings, but disable a few which occur in third-party code.
-  -Wall -Wextra -Werror
-  -Wno-null-pointer-arithmetic
-  -Wno-unused-parameter
-  -Wno-sign-compare
-  -Wno-unused-variable
-  -Wno-unused-function
-  -Wno-ignored-attributes
-  -Wno-missing-braces
-  -Wno-ignored-pragmas
-  -Wno-unused-but-set-variable
-  -Wno-unknown-warning-option
-  -Wno-unterminated-string-initialization
+  # Add all warnings. Note that third-party code is compiled with extra flags
+  # to disable warnings that crop up.
+  -Wall -Wextra
 
   # Compiling assembly flags lots of arguments as unused but that's not too
   # interesting so just ignore that.
   $<$<COMPILE_LANGUAGE:ASM>:-Wno-unused-command-line-argument>
 )
+
+if (ENABLE_WERROR)
+  add_compile_options(-Werror)
+endif()
+
+# =============================================================================
+# Detection of a libcall thread context for wasip3
+
+include(CheckSourceCompiles)
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+check_source_compiles(C [[
+  #ifndef __wasm_libcall_thread_context__
+  #error "missing define"
+  #endif
+]] HAVE_WASM_LIBCALL_THREAD_CONTEXT)
+
+if(ENABLE_COOP_THREADS)
+  if(NOT WASI STREQUAL "p3")
+    message(FATAL_ERROR "Cooperative threads are only supported on WASIp3")
+  endif()
+  if (NOT HAVE_WASM_LIBCALL_THREAD_CONTEXT)
+    message(FATAL_ERROR "Cooperative threads require clang 23 or later")
+  endif()
+  set(__wasi_cooperative_threads__ ON)
+else()
+endif()
 
 # =============================================================================
 # Helper functions for adding libraries.
@@ -218,7 +263,7 @@ endfunction()
 # the sysroot. The `*-shared` library is compiled with `-fPIC`.
 function(add_object_library name)
   add_library(${name}-shared OBJECT EXCLUDE_FROM_ALL ${ARGN})
-  set_target_properties(${name}-shared PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
+  set_pic(${name}-shared)
   target_compile_options(${name}-shared PRIVATE -fvisibility=default)
   add_dependencies(${name}-shared sysroot_inc)
   clang_format_target(${name}-shared)
@@ -243,8 +288,9 @@ endfunction()
 # and then ensures compile options are configured.
 function(add_internal_shared_library name)
   add_library(${name} SHARED EXCLUDE_FROM_ALL ${ARGN})
+  set_pic(${name})
   target_link_libraries(${name} PUBLIC musl-top-half-interface)
-  add_dependencies(${name} sysroot-c builtins)
+  add_dependencies(${name} sysroot-c builtins sysroot-empty-pthread)
   target_compile_options(${name} PRIVATE -fvisibility=default)
   set_target_properties(${name} PROPERTIES NO_SONAME 1)
   clang_format_target(${name})
@@ -278,6 +324,14 @@ function(sysroot_lib target file)
   endif()
 endfunction()
 
+function(set_pic target)
+  set_target_properties(${target} PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
+  # Windows needs an extra nudge to pass `-fPIC`
+  if (CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
+    target_compile_options(${target} PRIVATE -fPIC)
+  endif()
+endfunction()
+
 # =============================================================================
 # subdirectories
 #
@@ -302,6 +356,8 @@ endif()
 # here since I can't figure out anything else that works for now.
 if (WASI STREQUAL "p2")
   set(libc_extra_objects libc-bottom-half/sources/wasip2_component_type.o)
+elseif (WASI STREQUAL "p3")
+  set(libc_extra_objects libc-bottom-half/sources/wasip3_component_type.o)
 endif()
 
 add_library(c SHARED EXCLUDE_FROM_ALL

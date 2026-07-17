@@ -4,9 +4,7 @@
 #include <__struct_timespec.h>
 #include <__typedef_off_t.h>
 #include <unistd.h>
-#ifdef __wasilibc_use_wasip2
-#include <wasi/wasip2.h>
-#endif
+#include <wasi/version.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -21,7 +19,14 @@ struct timespec;
 /// afterward, you should call this before doing so.
 void __wasilibc_populate_preopens(void);
 
-#ifndef __wasilibc_use_wasip2
+/// Clear the set of preopens (and, on p2+, any other open file descriptors).
+///
+/// This is appropriate to call just prior to snapshotting the guest state so
+/// that it can be resumed on another runtime, in which case any
+/// previously-opened handles will no longer be valid.
+void __wasilibc_reset_preopens();
+
+#ifndef __wasip2__
 /// Register the given pre-opened file descriptor under the given path.
 int __wasilibc_register_preopened_fd(int fd, const char *prefix);
 #endif

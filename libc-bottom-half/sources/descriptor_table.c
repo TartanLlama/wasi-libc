@@ -6,36 +6,34 @@
 
 #include <assert.h>
 #include <errno.h>
+#include <stdlib.h>
 #include <wasi/descriptor_table.h>
 #include <wasi/stdio.h>
 
 #define MINSIZE 8
-#define MAXSIZE ((size_t)-1 / 2 + 1)
+#define MAXSIZE ((size_t) - 1 / 2 + 1)
 
 typedef struct {
-        bool occupied;
-        union {
-          int next;
-          descriptor_table_entry_t entry;
-        };
+  bool occupied;
+  union {
+    int next;
+    descriptor_table_entry_t entry;
+  };
 } descriptor_table_item_t;
 
 typedef struct {
-        // Dynamically allocated array of `cap` entries.
-        descriptor_table_item_t *entries;
-        // Next free entry.
-        int next;
-        // Number of `entries` that are initialized.
-        size_t len;
-        // Dynamic length of `entries`.
-        size_t cap;
+  // Dynamically allocated array of `cap` entries.
+  descriptor_table_item_t *entries;
+  // Next free entry.
+  size_t next;
+  // Number of `entries` that are initialized.
+  size_t len;
+  // Dynamic length of `entries`.
+  size_t cap;
 } descriptor_table_t;
 
-static descriptor_table_t global_table = { .entries = NULL,
-                                           .next = 0,
-                                           .len = 0,
-                                           .cap = 0 };
-static int global_table_stdio_initialized = 0;
+static descriptor_table_t global_table = {
+    .entries = NULL, .next = 0, .len = 0, .cap = 0};
 
 /**
  * Allocates a new `descriptor_table_entry_t` in the `table` provided.
@@ -106,7 +104,8 @@ static descriptor_table_entry_t *lookup(descriptor_table_t *table, int fd) {
  *
  * Returns -1 on failure and sets `errno`.
  */
-static int remove(descriptor_table_t *table, int fd, descriptor_table_entry_t *ret) {
+static int remove(descriptor_table_t *table, int fd,
+                  descriptor_table_entry_t *ret) {
   if (fd < 0 || (size_t)fd >= table->len) {
     errno = EBADF;
     return -1;
@@ -126,6 +125,22 @@ static int remove(descriptor_table_t *table, int fd, descriptor_table_entry_t *r
   return 0;
 }
 
+static void clear(descriptor_table_t *table) {
+  for (size_t i = 0; i < table->len; ++i) {
+    descriptor_table_item_t *table_entry = &table->entries[i];
+    if (table_entry->occupied) {
+      descriptor_table_entry_t entry = table_entry->entry;
+      entry.vtable->free(entry.data);
+    }
+  }
+  if (table->entries)
+    free(table->entries);
+  table->entries = NULL;
+  table->next = 0;
+  table->len = 0;
+  table->cap = 0;
+}
+
 static bool stdio_initialized = false;
 
 static int init_stdio() {
@@ -133,51 +148,52 @@ static int init_stdio() {
   return __wasilibc_init_stdio();
 }
 
-int descriptor_table_insert(descriptor_table_entry_t entry)
-{
-     if (!stdio_initialized && init_stdio() < 0)
-       goto error;
-     int fd = allocate(&global_table, entry);
-     if (fd < 0)
-       goto error;
-     return fd;
+int descriptor_table_insert(descriptor_table_entry_t entry) {
+  if (!stdio_initialized && init_stdio() < 0)
+    goto error;
+  int fd = allocate(&global_table, entry);
+  if (fd < 0)
+    goto error;
+  return fd;
 error:
-     entry.vtable->free(entry.data);
-     return -1;
+  entry.vtable->free(entry.data);
+  return -1;
 }
 
-descriptor_table_entry_t *descriptor_table_get_ref(int fd)
-{
-      if (!stdio_initialized && init_stdio() < 0)
-        return NULL;
-      return lookup(&global_table, fd);
+descriptor_table_entry_t *descriptor_table_get_ref(int fd) {
+  if (!stdio_initialized && init_stdio() < 0)
+    return NULL;
+  return lookup(&global_table, fd);
 }
 
-int descriptor_table_renumber(int fd, int newfd)
-{
-    descriptor_table_entry_t* fdentry = descriptor_table_get_ref(fd);
-    if (!fdentry)
-        return -1;
-    descriptor_table_entry_t* newfdentry = descriptor_table_get_ref(newfd);
-    if (!newfdentry)
-        return -1;
+int descriptor_table_renumber(int fd, int newfd) {
+  descriptor_table_entry_t *fdentry = descriptor_table_get_ref(fd);
+  if (!fdentry)
+    return -1;
+  descriptor_table_entry_t *newfdentry = descriptor_table_get_ref(newfd);
+  if (!newfdentry)
+    return -1;
 
-    descriptor_table_entry_t temp = *fdentry;
-    *fdentry = *newfdentry;
-    *newfdentry = temp;
-    if (remove(&global_table, fd, &temp) < 0)
-        return -1;
-    temp.vtable->free(temp.data);
-    return 0;
+  descriptor_table_entry_t temp = *fdentry;
+  *fdentry = *newfdentry;
+  *newfdentry = temp;
+  if (remove(&global_table, fd, &temp) < 0)
+    return -1;
+  temp.vtable->free(temp.data);
+  return 0;
 }
 
-int descriptor_table_remove(int fd)
-{
-      if (!stdio_initialized && init_stdio() < 0)
-        return -1;
-      descriptor_table_entry_t entry;
-      if (remove(&global_table, fd, &entry) < 0)
-        return -1;
-      entry.vtable->free(entry.data);
-      return 0;
+int descriptor_table_remove(int fd) {
+  if (!stdio_initialized && init_stdio() < 0)
+    return -1;
+  descriptor_table_entry_t entry;
+  if (remove(&global_table, fd, &entry) < 0)
+    return -1;
+  entry.vtable->free(entry.data);
+  return 0;
+}
+
+void descriptor_table_clear() {
+  clear(&global_table);
+  stdio_initialized = false;
 }

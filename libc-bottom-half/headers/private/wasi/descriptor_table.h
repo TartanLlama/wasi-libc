@@ -1,10 +1,131 @@
 #ifndef DESCRIPTOR_TABLE_H
 #define DESCRIPTOR_TABLE_H
 
-#include <wasi/wasip2.h>
-#include <wasi/poll.h>
-#include <sys/stat.h>
+#include <wasi/api.h>
+
+#ifndef __wasip1__
+#include <assert.h>
 #include <netinet/in.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <wasi/poll.h>
+
+#ifdef __wasip3__
+
+/// The stream is complete and no further operations are allowed on it.
+#define WASIP3_IO_DONE (1 << 0)
+/// An I/O operation, be it a read or write, is in flight.
+#define WASIP3_IO_INPROGRESS (1 << 1)
+/// The in-flight I/O operation is a zero-length operation. This means that if
+/// it's finished we expect that the next operation finishes immediately.
+#define WASIP3_IO_ZERO_INPROGRESS (1 << 2)
+/// A zero-sized in-flight I/O operation just finished so the next I/O op
+/// should finish immediately. If it doesn't it'll turn on the next flag.
+#define WASIP3_IO_SHOULD_BE_READY (1 << 3)
+/// This stream isn't compatible with zero-length reads/writes signaling
+/// readiness, so libc must buffer data internally for reads/writes.
+#define WASIP3_IO_MUST_BUFFER (1 << 4)
+
+/// Helper structure to package up state related to a wasip3 `stream<u8>`.
+///
+/// This is used by various helpers to coordinate reading/writing/etc on a
+/// stream. This simultaneously represents both readers and writers.
+typedef struct wasip3_io_state_t {
+  uint32_t stream;
+  /// Bitset of `WASIP3_IO_*` flags.
+  uint32_t flags;
+  /// Malloc'd buffer used for reads/writes. NULL if not present.
+  uint8_t *buf;
+  /// Start of `buf` that has data in-flight or ready.
+  size_t buf_start;
+  /// End of `buf` that has data in-flight or ready.
+  size_t buf_end;
+} wasip3_io_state_t;
+
+/// Initializes `state` with the `stream` provided.
+static inline void wasip3_io_state_init(wasip3_io_state_t *state,
+                                        uint32_t stream) {
+  assert(stream != 0);
+  memset(state, 0, sizeof(*state));
+  state->stream = stream;
+}
+
+/// Tests whether `state` has been initialized with a stream yet.
+static inline bool wasip3_io_state_present(wasip3_io_state_t *state) {
+  return state->stream != 0;
+}
+
+/// Closes out the streams/etc internal to `state`.
+///
+/// Internally the stream must be a reader-half of a `stream<u8>`.
+static inline void wasip3_read_state_close(wasip3_io_state_t *state) {
+  if (state->flags & WASIP3_IO_INPROGRESS)
+    filesystem_stream_u8_cancel_read(state->stream);
+  if (state->buf)
+    free(state->buf);
+  if (state->stream != 0)
+    filesystem_stream_u8_drop_readable(state->stream);
+  memset(state, 0, sizeof(*state));
+}
+
+/// Closes out the streams/etc internal to `state`.
+///
+/// Internally the stream must be a writer-half of a `stream<u8>`.
+static inline void wasip3_write_state_close(wasip3_io_state_t *state) {
+  if (state->flags & WASIP3_IO_INPROGRESS)
+    filesystem_stream_u8_cancel_write(state->stream);
+  if (state->buf)
+    free(state->buf);
+  if (state->stream != 0)
+    filesystem_stream_u8_drop_writable(state->stream);
+  memset(state, 0, sizeof(*state));
+}
+#endif
+
+// Metadata for WASI reads which is used to delegate to `__wasilibc_read(...)`
+// to perform the actual read of a stream.
+typedef struct wasi_read_t {
+  // An optional pointer to the internal offset of this stream, updated on
+  // successful reads.
+  off_t *offset;
+  // Whether or not this read will use blocking I/O.
+  bool blocking;
+  // The timeout, in nanoseconds, for this operation.
+  monotonic_clock_duration_t timeout;
+#ifdef __wasip2__
+  // The `wasi:io/streams.input-stream` that this is reading from.
+  streams_borrow_input_stream_t input;
+  // A required pointer to an owned pollable for `input`. This is lazily
+  // initialized as-necessary.
+  poll_own_pollable_t *pollable;
+#else
+  wasip3_io_state_t *state;
+
+  // A callback/ptr pair to invoke when EOF is reached to set errno and return
+  // an error code.
+  int (*eof)(void *);
+  void *eof_data;
+#endif
+} wasi_read_t;
+
+// Same as `wasip_read_t`, but for writes.
+typedef struct wasi_write_t {
+  off_t *offset;
+  bool blocking;
+  monotonic_clock_duration_t timeout;
+
+#ifdef __wasip2__
+  streams_borrow_output_stream_t output;
+  poll_own_pollable_t *pollable;
+#else
+  wasip3_io_state_t *state;
+  // A callback/ptr pair to invoke when EOF is reached to set errno and return
+  // an error code.
+  int (*eof)(void *);
+  void *eof_data;
+#endif
+} wasi_write_t;
 
 /**
  * Operations that are required of all descriptors registered as file
@@ -20,75 +141,69 @@
  */
 typedef struct descriptor_vtable_t {
   /// Deallocates the parameter provided, closing all resources as well.
-  void (*free)(void*);
+  void (*free)(void *);
 
   // =====================================================================
   // Generic I/O
 
-  /// Looks up a `wasi:io/streams.input-stream` object and stores it in
-  /// the first argument. If provide also stores a pointer to the internal
-  /// `off_t` offset and `pollable` for this object. The returned pointers
-  /// point within the descriptor itself.
-  int (*get_read_stream)(void*, streams_borrow_input_stream_t*, off_t**, poll_own_pollable_t**);
-
+  /// Looks up metadata to perform a read operation for this stream. This is
+  /// used to implement the `read` syscall, for example, and is also used with
+  /// `poll` when waiting for readability.
+  int (*get_read_stream)(void *, wasi_read_t *);
   /// Same as `get_read_stream`, but for output streams.
-  int (*get_write_stream)(void*, streams_borrow_output_stream_t*, off_t**, poll_own_pollable_t**);
+  int (*get_write_stream)(void *, wasi_write_t *);
 
   /// Sets the nonblocking flag for this object to the specified value.
-  int (*set_blocking)(void*, bool);
+  int (*set_blocking)(void *, bool);
 
   /// Implementation of `fstat` the function call, used to learn about file
   /// descriptors.
-  int (*fstat)(void*, struct stat*);
+  int (*fstat)(void *, struct stat *);
 
   // =====================================================================
   // File-related APIs
 
   /// Looks up a `wasi:filesystem/types.descriptor`, if present, from this
   /// object.
-  int (*get_file)(void*, filesystem_borrow_descriptor_t*);
+  int (*get_file)(void *, filesystem_borrow_descriptor_t *);
   /// Implementation of `lseek`-the-function.
-  off_t (*seek)(void*, off_t, int);
-  /// Used during `unlinkat` to ensure that all internal stremas are
-  /// closed before deleting the file to ensure there are no open references to
-  /// it.
-  void (*close_streams)(void*);
+  off_t (*seek)(void *, off_t, int);
   /// Implementation of `fnctl(fd, F_GETFL)`.
-  int (*fcntl_getfl)(void*);
+  int (*fcntl_getfl)(void *);
   /// Implementation of `fnctl(fd, F_SETFL)`.
-  int (*fcntl_setfl)(void*, int);
+  int (*fcntl_setfl)(void *, int);
   /// Implementation of `isatty`-the-function.
-  int (*isatty)(void*);
+  int (*isatty)(void *);
 
   // =====================================================================
   // Sockets-related APIs
 
   /// Implementation of `accept4`-the-function.
-  int (*accept4)(void*, struct sockaddr *addr, socklen_t *addrlen, int flags);
+  int (*accept4)(void *, struct sockaddr *addr, socklen_t *addrlen, int flags);
   /// Implementation of `bind`-the-function.
-  int (*bind)(void*, const struct sockaddr *addr, socklen_t addrlen);
+  int (*bind)(void *, const struct sockaddr *addr, socklen_t addrlen);
   /// Implementation of `connect`-the-function.
-  int (*connect)(void*, const struct sockaddr *addr, socklen_t addrlen);
+  int (*connect)(void *, const struct sockaddr *addr, socklen_t addrlen);
   /// Implementation of `getsockname`-the-function.
-  int (*getsockname)(void*, struct sockaddr *addr, socklen_t *addrlen);
+  int (*getsockname)(void *, struct sockaddr *addr, socklen_t *addrlen);
   /// Implementation of `getpeername`-the-function.
-  int (*getpeername)(void*, struct sockaddr *addr, socklen_t *addrlen);
+  int (*getpeername)(void *, struct sockaddr *addr, socklen_t *addrlen);
   /// Implementation of `listen`-the-function.
-  int (*listen)(void*, int backlog);
+  int (*listen)(void *, int backlog);
   /// Implementation of `recvfrom`-the-function.
-  ssize_t (*recvfrom)(void*, void *buffer, size_t length, int flags,
+  ssize_t (*recvfrom)(void *, void *buffer, size_t length, int flags,
                       struct sockaddr *addr, socklen_t *addrlen);
   /// Implementation of `sendto`-the-function.
-  ssize_t (*sendto)(void*, const void *buffer, size_t length, int flags,
+  ssize_t (*sendto)(void *, const void *buffer, size_t length, int flags,
                     const struct sockaddr *addr, socklen_t addrlen);
   /// Implementation of `shutdown`-the-function.
-  int (*shutdown)(void*, int how);
+  int (*shutdown)(void *, int how);
   /// Implementation of `getsockopt`-the-function.
-  int (*getsockopt)(void*, int level, int optname,
-                    void *optval, socklen_t *optlen);
+  int (*getsockopt)(void *, int level, int optname, void *optval,
+                    socklen_t *optlen);
   /// Implementation of `setsockopt`-the-function.
-  int (*setsockopt)(void*, int level, int optname,
-                    const void *optval, socklen_t optlen);
+  int (*setsockopt)(void *, int level, int optname, const void *optval,
+                    socklen_t optlen);
 
   // =====================================================================
   // `poll`-related APIs
@@ -101,8 +216,9 @@ typedef struct descriptor_vtable_t {
   ///
   /// If this function is not provided then `poll` will use `get_read_stream`
   /// and `get_write_stream`, if present, to handle `POLL{RD,WR}NORM` events.
-  int (*poll_register)(void*, poll_state_t *state, short events);
+  int (*poll_register)(void *, poll_state_t *state, short events);
 
+#ifdef __wasip2__
   /// Invoked when `poll` has already run and detected that this object was
   /// ready. The `events` provided are the same as those provided to
   /// `__wasilibc_poll_add` originally. This function should call
@@ -111,7 +227,8 @@ typedef struct descriptor_vtable_t {
   ///
   /// If this function is not provided then `events` will automatically
   /// be placed into the `revents` field of `pollfd`.
-  int (*poll_finish)(void*, poll_state_t *state, short events);
+  int (*poll_finish)(void *, poll_state_t *state, short events);
+#endif // __wasip2__
 } descriptor_vtable_t;
 
 /// A "fat pointer" which is placed inside of the descriptor table.
@@ -147,4 +264,9 @@ int descriptor_table_remove(int fd);
 /// errno on failure.
 int descriptor_table_renumber(int fd, int newfd);
 
-#endif
+/// Removes all file descriptors from the table, running their destructors.
+void descriptor_table_clear();
+
+#endif // __wasip1__
+
+#endif // DESCRIPTOR_TABLE_H

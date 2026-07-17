@@ -40,28 +40,43 @@ cmake_path(GET builtins_lib_path PARENT_PATH builtins_lib_dir)
 
 if(BUILTINS_LIB)
   message(STATUS "Using builtins lib: ${BUILTINS_LIB}")
-  add_custom_command(
-    OUTPUT ${builtins_lib_path}
-    COMMAND ${CMAKE_COMMAND} -E copy ${BUILTINS_LIB} ${builtins_lib_path}
-    DEPENDS ${BUILTINS_LIB}
-  )
+  set(builtins_lib_src ${BUILTINS_LIB})
+  set(builtins_lib_dep ${BUILTINS_LIB})
 else()
   message(STATUS "Using historical builtins lib from wasi-sdk...")
   include(ExternalProject)
   ExternalProject_Add(
     wasi-sdk-builtins
     EXCLUDE_FROM_ALL ON
-    URL https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-25/libclang_rt.builtins-wasm32-wasi-25.0.tar.gz
+    URL https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-34-rc.1/libclang_rt-34.0-rc.1.tar.gz
     CONFIGURE_COMMAND ""
     BUILD_COMMAND ""
     INSTALL_COMMAND ""
   )
   ExternalProject_Get_Property(wasi-sdk-builtins SOURCE_DIR)
-  set(src ${SOURCE_DIR}/libclang_rt.builtins-wasm32.a)
-  add_custom_command(
-    OUTPUT ${builtins_lib_path}
-    COMMAND ${CMAKE_COMMAND} -E copy ${src} ${builtins_lib_path}
-    DEPENDS wasi-sdk-builtins
-  )
+  if(ENABLE_COOP_THREADS)
+    set(builtins_target "wasm32-unknown-wasip3")
+  else()
+    set(builtins_target "wasm32-unknown-wasip2")
+  endif()
+  set(builtins_lib_src ${SOURCE_DIR}/${builtins_target}/libclang_rt.builtins.a)
+  set(builtins_lib_dep wasi-sdk-builtins)
 endif()
+
+add_custom_command(
+  OUTPUT ${builtins_lib_path}
+
+  # Copy `libclang_rt.*` into place from the source into the final destination
+  # within `tmp_resource_dir`. This is needed during linking to find
+  # `libclang_rt.*` under the appropriate path for this target.
+  COMMAND ${CMAKE_COMMAND} -E copy ${builtins_lib_src} ${builtins_lib_path}
+
+  # Additionally fill in the `include` directory for the `tmp_resource_dir` that
+  # we're creating. This is required to get access to the compiler's `stddef.h`,
+  # for example. Here we symlink to whatever the compiler already has as that's
+  # as good as we're going to get.
+  COMMAND ${CMAKE_COMMAND} -E create_symlink ${system_resource_dir}/include ${tmp_resource_dir}/include
+
+  DEPENDS ${builtins_lib_dep}
+)
 add_custom_target(builtins DEPENDS ${builtins_lib_path})

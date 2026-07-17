@@ -6,8 +6,14 @@ add_subdirectory(signal)
 # =============================================================================
 # sysroot headers from the bottom half
 #
-configure_file(headers/public/__wasi_snapshot.h.in ${SYSROOT_INC}/__wasi_snapshot.h)
-add_custom_target(sysroot-wasi-snapshot-header DEPENDS ${SYSROOT_INC}/__wasi_snapshot.h)
+if(WASI_SDK_VERSION)
+  set(__wasi_sdk_version__ ${WASI_SDK_VERSION})
+  if (WASI_SDK_VERSION MATCHES "([0-9]+)\\..*")
+    set(__wasi_sdk_major__ ${CMAKE_MATCH_1})
+  endif()
+endif()
+configure_file(headers/public/wasi/version.h.in ${SYSROOT_INC}/wasi/version.h)
+add_custom_target(sysroot-wasi-snapshot-header DEPENDS ${SYSROOT_INC}/wasi/version.h)
 add_dependencies(sysroot_inc sysroot-wasi-snapshot-header)
 
 file(
@@ -17,40 +23,28 @@ file(
   headers/public/*.h
 )
 
-# TODO: these headers are not actually installed in the sysroot since the
-# musl-sourced ones are. These should probably be deleted from the source
-# tree and the musl ones used instead.
-list(REMOVE_ITEM globbed_headers
-  headers/public/dirent.h
-  headers/public/errno.h
-  headers/public/fcntl.h
-  headers/public/inttypes.h
-  headers/public/netinet/in.h
-  headers/public/poll.h
-  headers/public/stdlib.h
-  headers/public/string.h
-  headers/public/sys/ioctl.h
-  headers/public/sys/resource.h
-  headers/public/sys/select.h
-  headers/public/sys/socket.h
-  headers/public/sys/stat.h
-  headers/public/sys/time.h
-  headers/public/sys/times.h
-  headers/public/sys/types.h
-  headers/public/sys/uio.h
-  headers/public/sys/un.h
-  headers/public/time.h
-  headers/public/unistd.h
-  headers/public/wchar.h
-)
+if (NOT (WASI STREQUAL "p2"))
+  list(REMOVE_ITEM globbed_headers headers/public/wasi/__generated_wasip2.h)
+endif()
 
-if (WASI STREQUAL "p1")
-  list(REMOVE_ITEM globbed_headers headers/public/wasi/wasip2.h)
+if (NOT (WASI STREQUAL "p3"))
+  list(REMOVE_ITEM globbed_headers headers/public/wasi/__generated_wasip3.h)
 endif()
 
 foreach(header ${globbed_headers})
   string(REPLACE "headers/public/" "" dst ${header})
   add_sysroot_header(${header} ${dst})
+endforeach()
+
+file(
+  GLOB_RECURSE globbed_private_headers
+  RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
+  CONFIGURE_DEPENDS
+  headers/private/*.h
+)
+
+foreach(header ${globbed_private_headers})
+  clang_format_file(${header})
 endforeach()
 
 # =============================================================================
@@ -148,30 +142,56 @@ if (WASI STREQUAL "p1")
     cloudlibc/src/libc/sys/socket/shutdown.c
     sources/accept-wasip1.c
   )
-elseif(WASI STREQUAL "p2")
+else()
   list(APPEND bottom_half_sources
-    sources/accept-wasip2.c
+    sources/accept.c
     sources/bind.c
     sources/connect.c
     sources/descriptor_table.c
     sources/getsockpeername.c
     sources/listen.c
-    sources/netdb.c
-    sources/poll-wasip2.c
+    sources/file_utils.c
+    sources/file.c
     sources/recv.c
     sources/send.c
     sources/shutdown.c
     sources/socket.c
     sources/sockets_utils.c
     sources/sockopt.c
-    sources/wasip2.c
-    sources/wasip2_file.c
-    sources/wasip2_file_utils.c
-    sources/wasip2_stdio.c
-    sources/wasip2_tcp.c
-    sources/wasip2_udp.c
+    sources/tcp.c
+    sources/udp.c
+    sources/netdb.c
   )
 endif()
+
+if(WASI STREQUAL "p2")
+  list(APPEND bottom_half_sources
+    sources/wasip2.c
+    sources/wasip2_stdio.c
+  )
+endif()
+
+if (WASI STREQUAL "p3")
+  list(APPEND bottom_half_sources
+    sources/wasip3.c
+    sources/wasip3_block_on.c
+    sources/wasip3_stdio.c
+  )
+endif()
+
+if (HAVE_WASM_LIBCALL_THREAD_CONTEXT)
+  list(APPEND bottom_half_sources
+    sources/__libcall_thread_context.S
+    sources/__wasm_init_task.S
+  )
+endif()
+
+# Don't export symbols of generated code in shared libraries, so specifically
+# pass `-fvisibility=hidden`.
+set_source_files_properties(sources/wasip2.c PROPERTIES
+  COMPILE_OPTIONS -fvisibility=hidden)
+set_source_files_properties(sources/wasip3.c PROPERTIES
+  COMPILE_OPTIONS -fvisibility=hidden)
 
 add_object_library(bottom-half ${bottom_half_sources})
 foreach(obj bottom-half-shared bottom-half-static)
@@ -183,31 +203,91 @@ foreach(obj bottom-half-shared bottom-half-static)
   )
 endforeach()
 
-add_custom_target(sysroot-startup-objects)
-add_dependencies(sysroot sysroot-startup-objects)
 
 # =============================================================================
 # startup objects
 #
-foreach(file crt/crt1.c
-             crt/crt1-command.c
+# This is the logic for building `crt1{,-reactor,-command}.o` objects which
+# Clang will link by default based on compiler flags. These are compiled into
+# "object libraries" with CMake and then they're copied into the final location
+# with adjustments based on WASI versions.
+foreach(file crt/crt1-command.c
              crt/crt1-reactor.c)
-  # get the filename without the directory and extension
-  cmake_path(GET file STEM filename)
-
-  # create a custom target for each file
-  add_library(${filename}.o OBJECT ${file})
-  target_link_libraries(${filename}.o PUBLIC musl-top-half-interface)
-  set_target_properties(${filename}.o PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
-  target_compile_options(${filename}.o PRIVATE -fvisibility=default)
-
-  # add a custom command to compile the file
-  set(dst ${SYSROOT_LIB}/${filename}.o)
-  add_custom_command(
-    OUTPUT ${dst}
-    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_OBJECTS:${filename}.o> ${dst}
-    DEPENDS ${filename}.o
-  )
-  add_custom_target(sysroot-startup-${filename}.o DEPENDS ${dst})
-  add_dependencies(sysroot-startup-objects sysroot-startup-${filename}.o)
+  cmake_path(GET file STEM stem)
+  add_library(${stem} OBJECT ${file})
+  clang_format_target(${stem})
+  target_link_libraries(${stem} PRIVATE musl-top-half-interface)
+  set_pic(${stem})
+  target_compile_options(${stem} PRIVATE -fvisibility=default -fno-lto)
 endforeach()
+
+set(crt_sysroot ${SYSROOT}/lib/${TARGET_TRIPLE})
+
+# crt1-reactor.o is a straight copy of what CMake produces
+add_custom_command(
+  OUTPUT ${crt_sysroot}/crt1-reactor.o
+  COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_OBJECTS:crt1-reactor> ${crt_sysroot}/crt1-reactor.o
+  DEPENDS crt1-reactor $<TARGET_OBJECTS:crt1-reactor>
+)
+
+if (WASI STREQUAL "p1")
+  # wasip1: crt1-command.o is a straight copy of what CMake produces
+  add_custom_command(
+    OUTPUT ${crt_sysroot}/crt1-command.o
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_OBJECTS:crt1-command> ${crt_sysroot}/crt1-command.o
+    DEPENDS crt1-command $<TARGET_OBJECTS:crt1-command>
+  )
+else()
+  if (WASI STREQUAL "p2")
+    set(world wasi:cli/command@${wasip2-version})
+  elseif (WASI STREQUAL "p3")
+    set(world wasi:cli/command@${wasip3-version})
+  else()
+    message(FATAL_ERROR "Unknown WASI version: ${WASI}")
+  endif()
+
+  # wasip2+: crt1-command.o is modified from what CMake produces to
+  # additionally have a custom section representing the type information needed
+  # for its contained export. This is the `wasi:cli/run` interface, for example.
+  #
+  # TODO: ideally this wouldn't need `wasm-tools` as that's an extra build tool
+  # needed here and it's best to slim down dependencies as much as possible.
+  # This additionally requires downloading/vendoring WITs which isn't great.
+  # Ideally the type information embedded here would be referenced dierctly in
+  # `crt1-command.c` itself in the source. That would likely require some
+  # combination of `__asm__` and `#embed` but I at least couldn't figure out how
+  # to get that working. I'm also not aware of a way to, in Clang, define a
+  # global in C that goes into a custom section in the output object. Another
+  # possible route would be to use the `--relocatable` option of `wasm-ld,` but
+  # it looks like that loses `__attribute__((export_name("...")))` information
+  # which this object file relies on. As a workaround `wasm-tools` is used for
+  # now. If you, dear reader, know of how to do this in the C source itself
+  # please feel free to open an issue or a PR and maintainers can work with you
+  # on getting that integrated.
+  add_custom_command(
+    OUTPUT ${crt_sysroot}/crt1-command.o
+    COMMAND
+      ${wasm_tools} component embed
+        ${CMAKE_SOURCE_DIR}/wasi/${WASI}/wit
+        $<TARGET_OBJECTS:crt1-command>
+        --world ${world}
+        -o ${crt_sysroot}/crt1-command.o
+    DEPENDS crt1-command $<TARGET_OBJECTS:crt1-command> wasm-tools
+  )
+endif()
+
+# Provide a plain crt1.o for toolchain compatibility, identical to
+# `crt1-command.c`
+add_custom_command(
+  OUTPUT ${crt_sysroot}/crt1.o
+  COMMAND ${CMAKE_COMMAND} -E copy ${crt_sysroot}/crt1-command.o ${crt_sysroot}/crt1.o
+  DEPENDS ${crt_sysroot}/crt1-command.o
+)
+
+add_custom_target(sysroot-startup-objects
+  DEPENDS
+    ${crt_sysroot}/crt1-reactor.o
+    ${crt_sysroot}/crt1-command.o
+    ${crt_sysroot}/crt1.o
+)
+add_dependencies(sysroot sysroot-startup-objects)

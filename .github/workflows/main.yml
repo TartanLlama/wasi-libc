@@ -37,14 +37,17 @@ jobs:
             os: windows-2025
             clang_version: 20.1.8
             upload: windows-clang-20
-            args: -DBUILD_SHARED=OFF
+          - name: Build on WASIp2 Windows x86_64
+            os: windows-2025
+            clang_version: 20.1.8
+            args: -DTARGET_TRIPLE=wasm32-wasip2
 
           # Other versions of LLVM
           - name: Build with LLVM 11
             os: ubuntu-22.04
             clang_version: 11
             upload: linux-x86_64-clang-11
-            args: -DSETJMP=OFF -DBUILD_SHARED=OFF
+            args: -DSETJMP=OFF -DBUILD_SHARED=OFF -DENABLE_WERROR=OFF
           - name: Build with LLVM 18
             os: ubuntu-24.04
             clang_version: 18
@@ -57,79 +60,125 @@ jobs:
           # but that can be expanded as necessary in the future too.
           - name: Test wasm32-wasi
             os: ubuntu-24.04
-            clang_version: 19
+            clang_version: 20
             test: true
             upload: wasm32-wasi
             args: -DTARGET_TRIPLE=wasm32-wasi
 
           - name: Test wasm32-wasip1
             os: ubuntu-24.04
-            clang_version: 19
+            clang_version: 20
             test: true
             upload: wasm32-wasip1
             args: -DTARGET_TRIPLE=wasm32-wasip1
 
           - name: Test wasm32-wasip2
             os: ubuntu-24.04
-            clang_version: 19
+            clang_version: 20
             test: true
             upload: wasm32-wasip2
             args: -DTARGET_TRIPLE=wasm32-wasip2
 
           - name: Test wasm32-wasip1-threads
             os: ubuntu-24.04
-            clang_version: 19
+            clang_version: 20
             test: true
             upload: wasm32-wasip1-threads
             args: -DTARGET_TRIPLE=wasm32-wasip1-threads
 
           - name: Test wasm32-wasip1 in V8
             os: ubuntu-24.04
-            clang_version: 19
+            clang_version: 20
             test: true
-            test_with_v8: true
-            args: -DTARGET_TRIPLE=wasm32-wasip1
+            args: -DTARGET_TRIPLE=wasm32-wasip1 -DTEST_WITH_V8=ON
 
           - name: Test wasm32-wasip1-threads in V8
             os: ubuntu-24.04
-            clang_version: 19
+            clang_version: 20
             test: true
-            test_with_v8: true
-            args: -DTARGET_TRIPLE=wasm32-wasip1-threads
+            args: -DTARGET_TRIPLE=wasm32-wasip1-threads -DTEST_WITH_V8=ON
 
           - name: Test wasm32-wasi-simd
             os: ubuntu-24.04
-            clang_version: 19
+            clang_version: 20
             test: true
             upload: wasm32-wasi-simd
             args: -DSIMD=ON -DCHECK_SYMBOLS=OFF
 
           - name: Test wasm32-wasip1 (debug)
             os: ubuntu-24.04
-            clang_version: 19
+            clang_version: 20
             test: true
             args: -DCMAKE_BUILD_TYPE=Debug
 
           - name: Test wasm32-wasip2 (debug)
             os: ubuntu-24.04
-            clang_version: 19
+            clang_version: 20
             test: true
             args: -DCMAKE_BUILD_TYPE=Debug -DTARGET_TRIPLE=wasm32-wasip2
 
           - name: Test wasm32-wasip1-threads (debug)
             os: ubuntu-24.04
-            clang_version: 19
+            clang_version: 20
             test: true
             args: -DCMAKE_BUILD_TYPE=Debug -DTARGET_TRIPLE=wasm32-wasip1-threads
 
+          - name: Test wasm32-wasip3
+            os: ubuntu-24.04
+            clang_version: 20
+            test: true
+            upload: wasm32-wasip3
+            args: -DTARGET_TRIPLE=wasm32-wasip3
+
+          - name: Test wasm32-wasip3 (debug)
+            os: ubuntu-24.04
+            clang_version: 20
+            test: true
+            args: -DCMAKE_BUILD_TYPE=Debug -DTARGET_TRIPLE=wasm32-wasip3
+
+          - name: Test wasm32-wasip3 coop-threads
+            os: ubuntu-24.04
+            clang_version: 23
+            test: true
+            args: -DTARGET_TRIPLE=wasm32-wasip3 -DENABLE_COOP_THREADS=ON
+
+          - name: Test wasm32-wasip3 coop-threads (debug)
+            os: ubuntu-24.04
+            clang_version: 23
+            test: true
+            args: -DCMAKE_BUILD_TYPE=Debug -DTARGET_TRIPLE=wasm32-wasip3 -DENABLE_COOP_THREADS=ON
+
           - name: Test emmalloc
             os: ubuntu-24.04
-            clang_version: 19
+            clang_version: 20
             test: true
             args: -DMALLOC=emmalloc
 
+          - name: Test LTO
+            os: ubuntu-24.04
+            clang_version: 20
+            test: true
+            args: -DLTO=full -DTARGET_TRIPLE=wasm32-wasip2 -DCHECK_SYMBOLS=OFF
+
+          - name: Test wasip2 on macOS
+            os: macos-15
+            clang_version: wasi-sdk-30
+            test: true
+            args: -DTARGET_TRIPLE=wasm32-wasip2 -DCMAKE_C_COMPILER_WORKS=ON
+
+          - name: Test wasip2 on Windows
+            os: windows-2025
+            clang_version: 20.1.8
+            test: true
+            args: -DTARGET_TRIPLE=wasm32-wasip2
+
+          - name: Test LLVM 22
+            os: ubuntu-24.04
+            clang_version: 22
+            test: true
+            args: -DTARGET_TRIPLE=wasm32-wasip2
     steps:
-    - uses: actions/checkout@v4.1.7
+    - uses: actions/checkout@v6
       with:
         submodules: true
 
@@ -137,14 +186,6 @@ jobs:
       with:
         clang_version: ${{ matrix.clang_version }}
         llvm_asset_suffix: ${{ matrix.llvm_asset_suffix }}
-
-    - name: Install V8 dependencies
-      if: matrix.test_with_v8
-      run: |
-        npm -C test/scripts/browser-test install
-        npx -C test/scripts/browser-test playwright install chromium-headless-shell
-        echo ENGINE="$PWD/test/scripts/browser-test/harness.mjs" >> $GITHUB_ENV
-        echo CTEST_ARGS="--label-exclude v8fail" >> $GITHUB_ENV
 
     - name: Configure libc
       run: |
@@ -155,16 +196,16 @@ jobs:
 
     - name: Configure testing
       if: matrix.test
-      run: cmake -S . -B build -DBUILD_TESTS=ON -DENGINE=${{ env.ENGINE }}
+      run: cmake -S . -B build -DENABLE_WERROR=ON -DBUILD_TESTS=ON
 
     - name: Build
       run: ninja -C build -v
 
     - name: Test
       if: matrix.test
-      run: ctest --test-dir build/test --output-on-failure -j4 $CTEST_ARGS
+      run: ctest --test-dir build/test --output-on-failure -j4
 
-    - uses: actions/upload-artifact@v4.4.0
+    - uses: actions/upload-artifact@v6
       if: matrix.upload
       with:
         name: ${{ format( 'sysroot-{0}.tgz', matrix.upload) }}
@@ -182,7 +223,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-15, windows-2025]
     steps:
-    - uses: actions/checkout@v4.1.7
+    - uses: actions/checkout@v6
       with:
         submodules: true
     - name: Install Rust (rustup)
@@ -204,17 +245,21 @@ jobs:
     name: Clang Format
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4.1.7
+    - uses: actions/checkout@v6
       with:
         submodules: true
     - run: cmake -S . -B build -DBUILD_TESTS=ON -G Ninja -DCMAKE_C_COMPILER=clang
+    - run: ninja -C build format-check
+    - run: cmake -S . -B build -DTARGET_TRIPLE=wasm32-wasip2
+    - run: ninja -C build format-check
+    - run: cmake -S . -B build -DTARGET_TRIPLE=wasm32-wasip1-threads
     - run: ninja -C build format-check
 
   rustfmt:
     name: Rustfmt
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4.1.7
+    - uses: actions/checkout@v6
       with:
         submodules: true
     - name: Install Rust
@@ -226,7 +271,7 @@ jobs:
     name: Ensure wit-bingen bindings are up-to-date
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4.1.7
+    - uses: actions/checkout@v6
       with:
         submodules: true
     - run: CC=clang cmake -S . -B build -G Ninja
@@ -251,20 +296,18 @@ jobs:
             args: -DTARGET_TRIPLE=wasm32-wasip1 -DMALLOC=emmalloc
           - name: wasm32-wasip2
             args: -DTARGET_TRIPLE=wasm32-wasip2
+          - name: wasm32-wasip3
+            args: -DTARGET_TRIPLE=wasm32-wasip3
     steps:
-    - uses: actions/checkout@v4.1.7
+    - uses: actions/checkout@v6
       with:
         submodules: true
     - run: |
-        curl https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-25/wasi-sdk-25.0-arm64-linux.tar.gz -L | tar xzvf -
-        echo "WASI_SDK_PATH=`pwd`/wasi-sdk-25.0-arm64-linux" >> $GITHUB_ENV
+        curl https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-32/wasi-sdk-32.0-arm64-linux.tar.gz -L | tar xzvf -
+        echo "WASI_SDK_PATH=`pwd`/wasi-sdk-32.0-arm64-linux" >> $GITHUB_ENV
       if: runner.os == 'Linux'
       shell: bash
       working-directory: ${{ runner.tool_cache }}
-    - name: Setup `wasmtime`
-      uses: bytecodealliance/actions/wasmtime/setup@v1
-      with:
-        version: "38.0.3"
     - name: Setup wasi-libc
       run: |
         cmake -S . -B build -G Ninja \
@@ -275,3 +318,36 @@ jobs:
           -DCMAKE_C_COMPILER=$WASI_SDK_PATH/bin/clang
     - name: Build and test python
       run: ninja -C build -v python
+
+  # This is a "join node" which depends on all prior workflows. The merge queue,
+  # for example, gates on this to ensure that everything has executed
+  # successfully. This enables decoupling the set of CI jobs specified in this
+  # file with what should be gated on in the repository configuration. With a
+  # join node here it means, for example, that adding a new CI job doesn't
+  # require updating repository configuration and this can be updated directly
+  # here.
+  #
+  # Note that this currently always runs to always report a status, even on
+  # cancellation and even if dependency steps fail. Each dependency tries to
+  # cancel the whole run if it fails, so if a test matrix entry fails, for
+  # example, it cancels the build matrix entries too. This step then tries to
+  # fail on cancellation to ensure that the dependency failures are propagated
+  # correctly.
+  ci-status:
+    name: Record the result of this workflow
+    runs-on: ubuntu-latest
+    needs:
+      - buildlibc
+      - headerstest
+      - clang-format
+      - rustfmt
+      - bindings
+      - python
+    if: always()
+    steps:
+    # Calculate the exit status of the whole CI workflow.
+    # If all dependent jobs were successful, this exits with 0 (and the
+    # outcome job continues successfully). If a some dependent job has
+    # failed, this exits with 1.
+    - name: calculate the correct exit status
+      run: jq --exit-status 'all(.result == "success" or .result == "skipped")' <<< '${{ toJson(needs) }}'

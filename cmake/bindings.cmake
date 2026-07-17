@@ -1,66 +1,161 @@
-include(ba-download)
+# Enable turning this rule off entirely if so desired.
+option(BINDINGS_TARGET "Generate bindings target" ON)
+if (NOT BINDINGS_TARGET)
+  return()
+endif()
 
-ba_download(
-  wit-bindgen
-  "https://github.com/bytecodealliance/wit-bindgen"
-  "0.48.0"
-)
-ExternalProject_Get_Property(wit-bindgen SOURCE_DIR)
-set(wit_bindgen "${SOURCE_DIR}/wit-bindgen")
+# If `wit-bindgen` is on the system and has the right version, favor that,
+# otherwise download a known good version.
+find_program(WIT_BINDGEN_EXECUTABLE NAMES wit-bindgen)
+if(WIT_BINDGEN_EXECUTABLE)
+  message(STATUS "Found wit-bindgen: ${WIT_BINDGEN_EXECUTABLE}")
 
-ExternalProject_Add(
-  wasi-wits
-  URL https://github.com/WebAssembly/wasi-cli/archive/refs/tags/v0.2.0.tar.gz
-  CONFIGURE_COMMAND ""
-  BUILD_COMMAND ""
-  INSTALL_COMMAND ""
-  EXCLUDE_FROM_ALL TRUE
-)
-ExternalProject_Get_Property(wasi-wits SOURCE_DIR)
-set(wit_dir ${SOURCE_DIR}/wit)
+  execute_process(
+    COMMAND ${WIT_BINDGEN_EXECUTABLE} --version
+    OUTPUT_VARIABLE WIT_BINDGEN_VERSION
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+  if (NOT (WIT_BINDGEN_VERSION MATCHES "0\\.59\\.0"))
+    message(WARNING "wit-bindgen version 0.59.0 is required, found: ${WIT_BINDGEN_VERSION}")
+    set(WIT_BINDGEN_EXECUTABLE "")
+  endif()
+endif()
+
+if (NOT WIT_BINDGEN_EXECUTABLE)
+  include(ba-download)
+  ba_download(
+    wit-bindgen
+    "https://github.com/bytecodealliance/wit-bindgen"
+    "0.59.0"
+  )
+  ExternalProject_Get_Property(wit-bindgen SOURCE_DIR)
+  set(wit_bindgen "${SOURCE_DIR}/wit-bindgen")
+else()
+  add_custom_target(wit-bindgen)
+  set(wit_bindgen ${WIT_BINDGEN_EXECUTABLE})
+endif()
+
 set(bottom_half "${CMAKE_SOURCE_DIR}/libc-bottom-half")
 
 add_custom_target(
-  bindings
+  bindings-p2
   COMMAND
     ${wit_bindgen} c
       --autodrop-borrows yes
       --rename-world wasip2
       --type-section-suffix __wasi_libc
-      --world wasi:cli/imports@0.2.0
-      --rename wasi:clocks/monotonic-clock@0.2.0=monotonic_clock
-      --rename wasi:clocks/wall-clock@0.2.0=wall_clock
-      --rename wasi:filesystem/preopens@0.2.0=filesystem_preopens
-      --rename wasi:filesystem/types@0.2.0=filesystem
-      --rename wasi:io/error@0.2.0=io_error
-      --rename wasi:io/poll@0.2.0=poll
-      --rename wasi:io/streams@0.2.0=streams
-      --rename wasi:random/insecure-seed@0.2.0=random_insecure_seed
-      --rename wasi:random/insecure@0.2.0=random_insecure
-      --rename wasi:random/random@0.2.0=random
-      --rename wasi:sockets/instance-network@0.2.0=instance_network
-      --rename wasi:sockets/ip-name-lookup@0.2.0=ip_name_lookup
-      --rename wasi:sockets/network@0.2.0=network
-      --rename wasi:sockets/tcp-create-socket@0.2.0=tcp_create_socket
-      --rename wasi:sockets/tcp@0.2.0=tcp
-      --rename wasi:sockets/udp-create-socket@0.2.0=udp_create_socket
-      --rename wasi:sockets/udp@0.2.0=udp
-      --rename wasi:cli/environment@0.2.0=environment
-      --rename wasi:cli/exit@0.2.0=exit
-      --rename wasi:cli/stdin@0.2.0=stdin
-      --rename wasi:cli/stdout@0.2.0=stdout
-      --rename wasi:cli/stderr@0.2.0=stderr
-      --rename wasi:cli/terminal-input@0.2.0=terminal_input
-      --rename wasi:cli/terminal-output@0.2.0=terminal_output
-      --rename wasi:cli/terminal-stdin@0.2.0=terminal_stdin
-      --rename wasi:cli/terminal-stdout@0.2.0=terminal_stdout
-      --rename wasi:cli/terminal-stderr@0.2.0=terminal_stderr
-      ${wit_dir}
-  COMMAND cmake -E copy wasip2.h ${bottom_half}/headers/public/wasi/
+      --world wasi:cli/imports@${wasip2-version}
+      --rename wasi:clocks/monotonic-clock@${wasip2-version}=monotonic_clock
+      --rename wasi:clocks/wall-clock@${wasip2-version}=wall_clock
+      --rename wasi:filesystem/preopens@${wasip2-version}=filesystem_preopens
+      --rename wasi:filesystem/types@${wasip2-version}=filesystem
+      --rename wasi:io/error@${wasip2-version}=io_error
+      --rename wasi:io/poll@${wasip2-version}=poll
+      --rename wasi:io/streams@${wasip2-version}=streams
+      --rename wasi:random/insecure-seed@${wasip2-version}=random_insecure_seed
+      --rename wasi:random/insecure@${wasip2-version}=random_insecure
+      --rename wasi:random/random@${wasip2-version}=random
+      --rename wasi:sockets/instance-network@${wasip2-version}=instance_network
+      --rename wasi:sockets/ip-name-lookup@${wasip2-version}=ip_name_lookup
+      --rename wasi:sockets/network@${wasip2-version}=network
+      --rename wasi:sockets/tcp-create-socket@${wasip2-version}=tcp_create_socket
+      --rename wasi:sockets/tcp@${wasip2-version}=tcp
+      --rename wasi:sockets/udp-create-socket@${wasip2-version}=udp_create_socket
+      --rename wasi:sockets/udp@${wasip2-version}=udp
+      --rename wasi:cli/environment@${wasip2-version}=environment
+      --rename wasi:cli/exit@${wasip2-version}=exit
+      --rename wasi:cli/stdin@${wasip2-version}=stdin
+      --rename wasi:cli/stdout@${wasip2-version}=stdout
+      --rename wasi:cli/stderr@${wasip2-version}=stderr
+      --rename wasi:cli/terminal-input@${wasip2-version}=terminal_input
+      --rename wasi:cli/terminal-output@${wasip2-version}=terminal_output
+      --rename wasi:cli/terminal-stdin@${wasip2-version}=terminal_stdin
+      --rename wasi:cli/terminal-stdout@${wasip2-version}=terminal_stdout
+      --rename wasi:cli/terminal-stderr@${wasip2-version}=terminal_stderr
+      ${CMAKE_SOURCE_DIR}/wasi/p2/wit
+  COMMAND cmake -E copy wasip2.h ${bottom_half}/headers/public/wasi/__generated_wasip2.h
   COMMAND cmake -E copy wasip2_component_type.o ${bottom_half}/sources
   COMMAND cmake -E copy wasip2.c ${bottom_half}/sources
-  COMMAND sed -i "'s_#include .wasip2\.h._#include \"wasi/wasip2.h\"_'" ${bottom_half}/sources/wasip2.c
-  COMMAND sed -i "s/extern void exit_exit/_Noreturn extern void exit_exit/" ${bottom_half}/headers/public/wasi/wasip2.h
-  COMMAND sed -i "s/extern void __wasm_import_exit_exit/_Noreturn extern void __wasm_import_exit_exit/" ${bottom_half}/sources/wasip2.c
-  DEPENDS wit-bindgen wasi-wits
+  DEPENDS wit-bindgen wkg wasip2-wits
 )
+
+add_custom_target(
+  bindings-p3
+  COMMAND
+    ${wit_bindgen} c
+      --autodrop-borrows yes
+      --rename-world wasip3
+      --type-section-suffix __wasi_libc
+      --world wasi:cli/imports@${wasip3-version}
+      --generate-threading-helpers
+      --rename wasi:clocks/monotonic-clock@${wasip3-version}=monotonic_clock
+      --rename wasi:clocks/system-clock@${wasip3-version}=system_clock
+      --rename wasi:filesystem/preopens@${wasip3-version}=filesystem_preopens
+      --rename wasi:filesystem/types@${wasip3-version}=filesystem
+      --rename wasi:random/insecure-seed@${wasip3-version}=random_insecure_seed
+      --rename wasi:random/insecure@${wasip3-version}=random_insecure
+      --rename wasi:random/random@${wasip3-version}=random
+      --rename wasi:sockets/types@${wasip3-version}=sockets
+      --rename wasi:sockets/ip-name-lookup@${wasip3-version}=ip_name_lookup
+      --rename wasi:cli/environment@${wasip3-version}=environment
+      --rename wasi:cli/exit@${wasip3-version}=exit
+      --rename wasi:cli/stdin@${wasip3-version}=stdin
+      --rename wasi:cli/stdout@${wasip3-version}=stdout
+      --rename wasi:cli/stderr@${wasip3-version}=stderr
+      --rename wasi:cli/terminal-input@${wasip3-version}=terminal_input
+      --rename wasi:cli/terminal-output@${wasip3-version}=terminal_output
+      --rename wasi:cli/terminal-stdin@${wasip3-version}=terminal_stdin
+      --rename wasi:cli/terminal-stdout@${wasip3-version}=terminal_stdout
+      --rename wasi:cli/terminal-stderr@${wasip3-version}=terminal_stderr
+
+      # Disable async bindings generation for some functions which are only
+      # ever called synchronously within libc.
+      "--async=-wasi:filesystem/types@${wasip3-version}#[method]descriptor.metadata-hash"
+      "--async=-wasi:filesystem/types@${wasip3-version}#[method]descriptor.metadata-hash-at"
+      "--async=-wasi:filesystem/types@${wasip3-version}#[method]descriptor.stat"
+      "--async=-wasi:filesystem/types@${wasip3-version}#[method]descriptor.stat-at"
+      "--async=-wasi:filesystem/types@${wasip3-version}#[method]descriptor.get-flags"
+      "--async=-wasi:filesystem/types@${wasip3-version}#[method]descriptor.open-at"
+      "--async=-wasi:filesystem/types@${wasip3-version}#[method]descriptor.read-directory"
+      "--async=-wasi:filesystem/types@${wasip3-version}#[method]descriptor.create-directory-at"
+      "--async=-wasi:filesystem/types@${wasip3-version}#[method]descriptor.remove-directory-at"
+      "--async=-wasi:filesystem/types@${wasip3-version}#[method]descriptor.unlink-file-at"
+      "--async=-wasi:filesystem/types@${wasip3-version}#[method]descriptor.advise"
+      "--async=-wasi:filesystem/types@${wasip3-version}#[method]descriptor.sync-data"
+      "--async=-wasi:filesystem/types@${wasip3-version}#[method]descriptor.sync"
+      "--async=-wasi:filesystem/types@${wasip3-version}#[method]descriptor.set-size"
+      "--async=-wasi:filesystem/types@${wasip3-version}#[method]descriptor.symlink-at"
+      "--async=-wasi:filesystem/types@${wasip3-version}#[method]descriptor.link-at"
+      "--async=-wasi:filesystem/types@${wasip3-version}#[method]descriptor.readlink-at"
+      "--async=-wasi:filesystem/types@${wasip3-version}#[method]descriptor.rename-at"
+      "--async=-wasi:filesystem/types@${wasip3-version}#[method]descriptor.set-times-at"
+      "--async=-wasi:filesystem/types@${wasip3-version}#[method]descriptor.set-times"
+      "--async=-wasi:sockets/ip-name-lookup@${wasip3-version}#resolve-addresses"
+      ${CMAKE_SOURCE_DIR}/wasi/p3/wit
+  COMMAND cmake -E copy wasip3.h ${bottom_half}/headers/public/wasi/__generated_wasip3.h
+  COMMAND cmake -E copy wasip3_component_type.o ${bottom_half}/sources
+  COMMAND cmake -E copy wasip3.c ${bottom_half}/sources
+  DEPENDS wit-bindgen wasip3-wits
+)
+
+add_custom_target(bindings DEPENDS bindings-p2 bindings-p3)
+
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
+  set(SED_INPLACE_ARGS -i '')
+else()
+  set(SED_INPLACE_ARGS -i)
+endif()
+
+function(wit_bindgen_edit p)
+  add_custom_target(
+    bindings-${p}-edit
+    COMMAND sed ${SED_INPLACE_ARGS} "'s_#include .wasi${p}\.h._#include \"wasi/wasi${p}.h\"_'" ${bottom_half}/sources/wasi${p}.c
+    COMMAND sed ${SED_INPLACE_ARGS} "s/extern void exit_exit/_Noreturn extern void exit_exit/" ${bottom_half}/headers/public/wasi/__generated_wasi${p}.h
+    COMMAND sed ${SED_INPLACE_ARGS} "s/extern void __wasm_import_exit_exit/_Noreturn extern void __wasm_import_exit_exit/" ${bottom_half}/sources/wasi${p}.c
+    DEPENDS bindings-${p}
+  )
+  add_dependencies(bindings bindings-${p}-edit)
+endfunction()
+
+wit_bindgen_edit(p2)
+wit_bindgen_edit(p3)

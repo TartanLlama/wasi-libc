@@ -20,13 +20,18 @@ add_custom_target(format-check)
 set(formatted_sources)
 
 function(clang_format_file file)
+  if (file MATCHES "__generated" OR
+      file MATCHES "wasip.\.c$" OR # Skip auto-generated files
+      file MATCHES "\.(s|S)$")     # Skip assembly files
+    return()
+  endif()
   cmake_path(ABSOLUTE_PATH file BASE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} OUTPUT_VARIABLE src)
 
   # Only format sources primarily authored in this repository itself. This
   # excludes upstream projects like cloudlibc/musl, malloc implementations, etc.
   if (NOT EXISTS ${src}
     OR ${src} MATCHES "cloudlibc"
-    OR ${src} MATCHES "libc-top-half"
+    OR (${src} MATCHES "libc-top-half" AND NOT ${src} MATCHES "libc-top-half/musl/src/thread/coop-threads")
     OR ${src} MATCHES "fts/musl-fts"
     OR ${src} MATCHES "dlmalloc"
     OR ${src} MATCHES "emmalloc"
@@ -35,6 +40,7 @@ function(clang_format_file file)
   endif()
 
   string(REPLACE "/" "_" source_target ${file})
+  string(REPLACE ":" "_" source_target ${source_target})
   add_custom_target(format-${source_target}
     COMMAND ${CLANG_FORMAT} -i ${src})
   add_custom_target(format-check-${source_target}

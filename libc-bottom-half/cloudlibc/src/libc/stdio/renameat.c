@@ -2,19 +2,24 @@
 //
 // SPDX-License-Identifier: BSD-2-Clause
 
-#ifdef __wasilibc_use_wasip2
-#include <wasi/wasip2.h>
-#include <wasi/file_utils.h>
-#include <common/errors.h>
-#else
 #include <wasi/api.h>
-#endif
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
 
+#ifndef __wasip1__
+#include <wasi/file_utils.h>
+#include <common/errors.h>
+#endif
+
 int __wasilibc_nocwd_renameat(int oldfd, const char *old, int newfd, const char *new) {
-#ifdef __wasilibc_use_wasip2
+#if defined(__wasip1__)
+  __wasi_errno_t error = __wasi_path_rename(oldfd, old, newfd, new);
+  if (error != 0) {
+    errno = error;
+    return -1;
+  }
+#elif defined(__wasip2__) || defined(__wasip3__)
   // Translate the file descriptors to internal handles
   filesystem_borrow_descriptor_t old_file_handle;
   if (fd_to_file_handle(oldfd, &old_file_handle) < 0)
@@ -25,10 +30,10 @@ int __wasilibc_nocwd_renameat(int oldfd, const char *old, int newfd, const char 
     return -1;
 
   // Convert the strings into WASI strings
-  wasip2_string_t old_path, new_path;
-  if (wasip2_string_from_c(old, &old_path) < 0)
+  wasi_string_t old_path, new_path;
+  if (wasi_string_from_c(old, &old_path) < 0)
     return -1;
-  if (wasip2_string_from_c(new, &new_path) < 0)
+  if (wasi_string_from_c(new, &new_path) < 0)
     return -1;
 
   // Rename the file
@@ -39,15 +44,11 @@ int __wasilibc_nocwd_renameat(int oldfd, const char *old, int newfd, const char 
                                                    &new_path,
                                                    &error_code);
   if (!ok) {
-    translate_error(error_code);
+    translate_error(&error_code);
     return -1;
   }
 #else
-  __wasi_errno_t error = __wasi_path_rename(oldfd, old, newfd, new);
-  if (error != 0) {
-    errno = error;
-    return -1;
-  }
+# error "Unknown WASI version"
 #endif
   return 0;
 }

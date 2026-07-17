@@ -8,14 +8,15 @@
 #endif
 #include <string.h>
 #include <stddef.h>
+#include <assert.h>
 #include "pthread_impl.h"
 #include "libc.h"
 #include "atomic.h"
 #include "syscall.h"
+#include <wasi/api.h>
+#include "lock.h"
 
-#if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT)
-volatile int __thread_list_lock;
-#endif
+DECLARE_WEAK_LOCK(__thread_list_lock);
 
 #ifndef __wasilibc_unmodified_upstream
 
@@ -40,6 +41,23 @@ struct stack_bounds {
 	size_t size;
 };
 
+static inline unsigned char *get_stack_pointer() {
+  unsigned char *sp;
+#ifdef __wasi_cooperative_threads__
+  __asm__(
+      ".functype   __wasm_get_stack_pointer () -> (i32)\n"
+      "call __wasm_get_stack_pointer\n"
+      "local.set %0\n"
+      : "=r"(sp));
+#else
+  __asm__(".globaltype __stack_pointer, i32\n"
+          "global.get __stack_pointer\n"
+          "local.set %0\n"
+          : "=r"(sp));
+#endif
+  return sp;
+}
+
 static inline struct stack_bounds get_stack_bounds()
 {
 	struct stack_bounds bounds;
@@ -52,19 +70,14 @@ static inline struct stack_bounds get_stack_bounds()
 		 * how wasm-ld lays out things. For pic, just give up.
 		 */
 #if !defined(__pic__)
-		unsigned char *sp;
-		__asm__(
-			".globaltype __stack_pointer, i32\n"
-			"global.get __stack_pointer\n"
-			"local.set %0\n"
-			: "=r"(sp));
-		if (sp > &__global_base) {
-			bounds.base = &__heap_base;
-			bounds.size = &__heap_base - &__data_end;
-		} else {
-			bounds.base = &__global_base;
-			bounds.size = (size_t)&__global_base;
-		}
+		unsigned char *sp = get_stack_pointer();
+    	if (sp > &__global_base) {
+    	  bounds.base = &__heap_base;
+    	  bounds.size = &__heap_base - &__data_end;
+    	} else {
+    	  bounds.base = &__global_base;
+    	  bounds.size = (size_t)&__global_base;
+    	}
 #else
 		bounds.base = 0;
 		bounds.size = 0;
@@ -74,9 +87,6 @@ static inline struct stack_bounds get_stack_bounds()
 	return bounds;
 }
 
-void __wasi_init_tp() {
-	__init_tp((void *)__get_tp());
-}
 #endif
 
 int __init_tp(void *p)
@@ -97,20 +107,27 @@ int __init_tp(void *p)
 	td->stack = bounds.base;
 	td->stack_size = bounds.size;
 	td->guard_size = 0;
-#ifdef _REENTRANT
-	td->detach_state = DT_JOINABLE;
-	/*
-	 * Initialize the TID to a value which doesn't conflict with
-	 * host-allocated TIDs, so that TID-based locks can work.
-	 *
-	 * Note:
-	 * - Host-allocated TIDs range from 1 to 0x1fffffff. (inclusive)
-	 * - __tl_lock and __lockfile uses TID 0 as "unlocked".
-	 * - __lockfile relies on the fact the most significant two bits
-	 *   of TIDs are 0.
-	 */
-	td->tid = 0x3fffffff;
-#endif
+	#if defined(__wasi_cooperative_threads__)
+	  td->detach_state = DT_JOINABLE;
+	  #ifdef __wasip3__
+	  td->tid = wasip3_thread_index();
+	  #else
+	  #error "Unknown WASI version"
+	  #endif
+	#elif defined(_REENTRANT)
+	  td->detach_state = DT_JOINABLE;
+	  /*
+	   * Initialize the TID to a value which doesn't conflict with
+	   * host-allocated TIDs, so that TID-based locks can work.
+	   *
+	   * Note:
+	   * - Host-allocated TIDs range from 1 to 0x1fffffff. (inclusive)
+	   * - __tl_lock and __lockfile uses TID 0 as "unlocked".
+	   * - __lockfile relies on the fact the most significant two bits
+	   *   of TIDs are 0.
+	   */
+	  td->tid = 0x3fffffff;
+	#endif
 #endif
 #if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT)
 	td->locale = &libc.global_locale;
@@ -137,7 +154,7 @@ static struct tls_module main_tls;
 extern void __wasm_init_tls(void*);
 #endif
 
-#if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT)
+#if defined(_REENTRANT) && !defined(__wasi_cooperative_threads__)
 void *__copy_tls(unsigned char *mem)
 {
 #ifdef __wasilibc_unmodified_upstream
@@ -267,4 +284,43 @@ static void static_init_tls(size_t *aux)
 }
 
 weak_alias(static_init_tls, __init_tls);
+#endif
+
+#ifdef __wasi_cooperative_threads__
+// Entrypoint for all new async tasks, invoked from `__wasm_init_async_task`.
+//
+// This is responsible for allocating a new stack for this async task in
+// addition to initializing TLS. TLS right now is stored at the top of the
+// stack.
+hidden void* __wasilibc_init_async_task(void) {
+  // Attempt to use the same stack size as the LLD-initialized stack (as
+  // reported by `get_stack_bounds`). If that failed (e.g. in PIC) mode then
+  // choose a best-effort constant.
+  size_t stack_size = get_stack_bounds().size;
+  if (stack_size == 0)
+    stack_size = __default_stacksize;
+
+  // Allocate the stack, trapping if allocation fails.
+  //
+  // FIXME(#810) this is never deallocated.
+  void* task_stack = malloc(stack_size);
+  if (task_stack == NULL)
+    __builtin_trap();
+
+  // TLS is stored at the top of the stack, and its initial address is
+  // aligned-down based on its requirement. Note that `__wasm_init_tls` serves
+  // double-duty of initializing using `memory.init` to initialize TLS while
+  // additionally setting the TLS base for this task.
+  uintptr_t stack_top = (uintptr_t)task_stack + stack_size;
+  uintptr_t tls_base_unaligned = stack_top - __builtin_wasm_tls_size();
+  uintptr_t tls_base = tls_base_unaligned & -__builtin_wasm_tls_align();
+  assert(tls_base >= (uintptr_t) task_stack);
+  __wasm_init_tls((void*)tls_base);
+
+  // The stack itself is always 16-byte aligned, so align down as necessary.
+  // Return this so the assembly shim can set this as the current stack pointer.
+  uintptr_t stack_init_aligned = tls_base & -16;
+  assert(stack_init_aligned >= (uintptr_t) task_stack);
+  return (void*) stack_init_aligned;
+}
 #endif

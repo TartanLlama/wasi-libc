@@ -4,31 +4,12 @@
 
 #include <common/clock.h>
 #include <common/time.h>
-
-#ifdef __wasilibc_use_wasip2
-#include <wasi/wasip2.h>
-#else
 #include <wasi/api.h>
-#endif
 #include <errno.h>
 #include <time.h>
 
 int clock_getres(clockid_t clock_id, struct timespec *res) {
-#ifdef __wasilibc_use_wasip2
-  if (res != NULL) {
-    if (clock_id == CLOCK_REALTIME) {
-        wall_clock_datetime_t time_result;
-        wall_clock_resolution(&time_result);
-        *res = timestamp_to_timespec(&time_result);
-    } else if (clock_id == CLOCK_MONOTONIC) {
-        monotonic_clock_duration_t time_result = monotonic_clock_resolution();
-        *res = instant_to_timespec(time_result);
-    } else {
-        errno = EINVAL; // wasip2 only supports wall and monotonic clocks
-        return -1;
-    }
-  }
-#else
+#if defined(__wasip1__)
   __wasi_timestamp_t ts;
   __wasi_errno_t error = __wasi_clock_res_get(clock_id->id, &ts);
   if (error != 0) {
@@ -36,6 +17,30 @@ int clock_getres(clockid_t clock_id, struct timespec *res) {
     return -1;
   }
   *res = timestamp_to_timespec(ts);
+#elif defined(__wasip2__) || defined(__wasip3__)
+  if (res != NULL) {
+    if (clock_id == CLOCK_REALTIME) {
+#ifdef __wasip2__
+        wall_clock_datetime_t time_result;
+        wall_clock_resolution(&time_result);
+        *res = timestamp_to_timespec(&time_result);
+#else // __wasip3__
+        *res = instant_to_timespec(system_clock_get_resolution());
+#endif
+    } else if (clock_id == CLOCK_MONOTONIC) {
+#ifdef __wasip2__
+        monotonic_clock_duration_t time_result = monotonic_clock_resolution();
+#else // __wasip3__
+        monotonic_clock_duration_t time_result = monotonic_clock_get_resolution();
+#endif
+        *res = instant_to_timespec(time_result);
+    } else {
+        errno = EINVAL; // wasip2/3 only supports wall and monotonic clocks
+        return -1;
+    }
+  }
+#else
+# error "Unsupported WASI version"
 #endif
   return 0;
 }
